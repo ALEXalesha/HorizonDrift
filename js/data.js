@@ -139,7 +139,7 @@
     { id: 'c1', name: 'Кубок новичка', about: 'Первые шаги: город ночью, побережье и порт.', pace: 0.8, pool: ['iskra', 'kobalt'], mult: 1,
       events: [
         { id: 'c1e1', type: 'race', track: 'city', laps: 2, opp: 3, name: 'Огни квартала' },
-        { id: 'c1e2', type: 'drift', track: 'port', laps: 2, goal: [9000, 5000, 2000], name: 'Первый занос' },
+        { id: 'c1e2', type: 'drift', track: 'port', laps: 2, goal: [8000, 4500, 1800], name: 'Первый занос' },
         { id: 'c1e3', type: 'time', track: 'coast', laps: 1, ref: 'iskra', name: 'Круг у моря' },
       ] },
     { id: 'c2', name: 'Кубок побережья', about: 'Быстрые виражи у моря и первая дуэль.', pace: 0.84, pool: ['kobalt', 'vihr', 'buran'], mult: 1.6,
@@ -153,13 +153,13 @@
       events: [
         { id: 'c3e1', type: 'race', track: 'desert', laps: 2, opp: 4, name: 'Каньон' },
         { id: 'c3e2', type: 'time', track: 'forest', laps: 1, ref: 'buran', name: 'Лесной спринт' },
-        { id: 'c3e3', type: 'drift', track: 'desert', laps: 1, goal: [11000, 6000, 2500], name: 'Пыльный занос' },
+        { id: 'c3e3', type: 'drift', track: 'desert', laps: 1, goal: [9500, 5500, 2500], name: 'Пыльный занос' },
         { id: 'c3e4', type: 'elim', track: 'desert', opp: 3, name: 'На вылет' },
       ] },
     { id: 'c4', name: 'Зимний кубок', about: 'Снег и лёд: сцепления мало, ошибок много.', pace: 0.9, pool: ['buran', 'sapsan', 'taifun'], mult: 3,
       events: [
         { id: 'c4e1', type: 'race', track: 'lake', laps: 2, opp: 4, name: 'Вокруг озера' },
-        { id: 'c4e2', type: 'drift', track: 'pass', laps: 1, goal: [12000, 7000, 3000], name: 'Снежный вальс' },
+        { id: 'c4e2', type: 'drift', track: 'pass', laps: 1, goal: [9000, 5500, 2500], name: 'Снежный вальс' },
         { id: 'c4e3', type: 'elim', track: 'lake', opp: 4, name: 'Ледяное выбывание' },
         { id: 'c4e4', type: 'duel', track: 'pass', laps: 1, name: 'Дуэль на перевале' },
       ] },

@@ -293,7 +293,7 @@
     }
     st.id = def.id; st.drift = def.drift; st.offroad = def.offroad; st.drive = def.drive; st.launch = def.launch; st.aero = def.aero;
     st.rearMul = 1.06 - 0.06 * def.drift;            // у «дрифтовых» задняя ось держит слабее
-    st.hbMul = 0.52 - 0.22 * def.drift;              // ручник отнимает сцепление задней оси
+    st.hbMul = 0.4 - 0.18 * def.drift;               // ручник отнимает сцепление задней оси
     st.crr = 0.013;
     st.cd = Math.max(0.05, (st.power / st.top - st.mass * G * st.crr) / (st.top * st.top));
     st.I = st.mass * 1.45;
@@ -438,6 +438,14 @@
     const vL2 = car.vx * fx + car.vz * fz;
     if (brakeIn > 0 && sgnL !== 0 && vL2 * sgnL < 0) { car.vx -= vL2 * fx; car.vz -= vL2 * fz; }
     if (speed < 0.4 && driveThr === 0) { car.vx *= 0.85; car.vz *= 0.85; car.w *= 0.85; }
+    // аркадный занос: боком машина теряет скорость мягко (газ почти держит её), а угол больше
+    // ~45° гасится - занос можно вести, а не только крутиться на месте
+    if (speed > 8 && vLong > 2 && Math.abs(beta) > 0.14 && brakeIn < 0.1) {
+      const sp2 = Math.hypot(car.vx, car.vz), minSp = speed - (3.4 - 2.6 * driveThr) * dt;
+      if (sp2 < minSp && sp2 > 0.1) { const k = minSp / sp2; car.vx *= k; car.vz *= k; }
+      const ab = Math.abs(beta);
+      if (!inp.hb && ab > 0.7 && beta * car.w < 0) car.w *= 1 - Math.min(1, 5 * dt * (ab - 0.7) / 0.3);
+    }
     car.x += car.vx * dt; car.z += car.vz * dt;
 
     car.speed = Math.hypot(car.vx, car.vz); car.vLong = vL2; car.beta = beta;
@@ -576,6 +584,14 @@
     if (c.finished && !tr.closed && s > tr.sFinish + 30) vt = 0;
     if (v < vt - 0.3) { inp.thr = 1; inp.brk = 0; } else if (v > vt + 1.2) { inp.thr = 0; inp.brk = clamp((v - vt) / 2.5, 0.25, 1); } else { inp.thr = 0.35; inp.brk = 0; }
     if (race.phase === 'countdown') { inp.thr = 0.3 + 0.3 * Math.sin(race.countdown * 9 + ai.laneBase * 3); inp.brk = 0; }
+    // «дрифтер» (для проверки, что цели дрифта достижимы): ручник на входе в поворот, газ в заносе
+    if (ai.drifter && race.phase === 'race') {
+      ai.hbT = (ai.hbT || 0) - dt;
+      const kA = tr.kappa[idxAt(tr, s + 10 + v * 0.45)];
+      if (kA > 1 / 75 && v > 13 && ai.hbT < -0.8 && Math.abs(c.beta) < 0.15) ai.hbT = 0.28;
+      if (ai.hbT > 0) { inp.hb = 1; inp.thr = c.st.drive === 'fwd' ? 0 : 0.5; inp.brk = 0; }
+      else if (Math.abs(c.beta) > 0.15) { inp.thr = Math.abs(c.beta) > 0.6 ? 0.5 : 1; inp.brk = 0; }
+    }
     // нитро на прямой, если впереди нет поворота
     inp.nitro = 0;
     if (ai.nitro && c.nitro > 0.2 && race.phase === 'race' && v > 15 && c.prof[idxAt(tr, s + 60)] > v + 8 && c.prof[idxAt(tr, s + 120)] > v + 5) inp.nitro = 1;
@@ -642,9 +658,9 @@
     }
 
     // Автопилот игрока (для проверок и снимков): едет как бот с темпом pace.
-    setAutopilot(c, pace) {
+    setAutopilot(c, pace, drifter) {
       c.autopilot = pace > 0;
-      if (c.autopilot) { c.ai = newAi({ pace, nitro: true }); c.prof = speedProfile(this.track, c.st); } else c.ai = null;
+      if (c.autopilot) { c.ai = newAi({ pace, nitro: true }); c.ai.drifter = !!drifter; c.prof = speedProfile(this.track, c.st); } else c.ai = null;
     }
 
     // Телепорт для проверок: машина в точке (s, d), скорость вдоль трассы.
@@ -696,7 +712,7 @@
         const along = c.vx * pr.tx + c.vz * pr.tz, face = Math.sin(c.h) * pr.tx + Math.cos(c.h) * pr.tz;
         if (along < -3 || (face < -0.5 && c.speed > 2)) c.wrongT += dt; else c.wrongT = Math.max(0, c.wrongT - dt * 2);
         c.wrong = c.wrongT > 1;
-        if (c.ai && !c.isPlayer) {
+        if (c.ai && (!c.isPlayer || c.autopilot)) {
           if (c.speed < 1.5 || c.wrong) c.stuckT += dt; else c.stuckT = 0;
           if (c.stuckT > 3) this.resetCar(c);
         }
