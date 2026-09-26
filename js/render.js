@@ -1021,7 +1021,7 @@
       let dx = fx, dz = fz;
       if (sp > 4) { const vl = Math.hypot(vx, vz); dx = fx * 0.6 + vx / vl * 0.4; dz = fz * 0.6 + vz / vl * 0.4; const l = Math.hypot(dx, dz); dx /= l; dz /= l; }
       const tx = px - dx * back, tz = pz - dz * back, ty = py + up;
-      if (!st.init) { st.x = tx; st.y = ty; st.z = tz; st.init = true; }
+      if (!st.init || Math.hypot(tx - st.x, tz - st.z) > 25) { st.x = tx; st.y = ty; st.z = tz; st.init = true; }   // скачок (возврат на трассу) - без долгого догона
       const kk = 1 - Math.exp(-dt * 7);
       st.x += (tx - st.x) * kk; st.y += (ty - st.y) * kk; st.z += (tz - st.z) * kk;
       if (pl.hit > 3) st.shake = Math.min(0.6, pl.hit * 0.05);
