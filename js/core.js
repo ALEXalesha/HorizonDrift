@@ -380,9 +380,11 @@
         Fdrive = driveThr * Math.min(st.power / Math.max(Math.abs(vLong), 1), st.launch * m * G) * tq;
       }
     } else if (driveThr > 0 && vLong > -9) Fdrive = -driveThr * 0.45 * m * G;
+    // нитро - аркадный «толчок» мимо шин: работает и когда колёса уже на пределе сцепления
     car.nitroOn = false;
+    let Fnitro = 0;
     if (inp.nitro && car.nitro > 0 && car.gear > 0 && driveThr > 0.2) {
-      Fdrive += st.nitroBoost * m * G; car.nitro = Math.max(0, car.nitro - dt / st.nitroCap); car.nitroOn = true;
+      Fnitro = st.nitroBoost * m * G; car.nitro = Math.max(0, car.nitro - dt / st.nitroCap); car.nitroOn = true;
     }
     const frontShare = st.drive === 'fwd' ? 1 : st.drive === 'awd' ? 0.4 : 0;
     let FxF = Fdrive * frontShare, FxR = Fdrive * (1 - frontShare);
@@ -425,7 +427,7 @@
     const cs = Math.cos(car.steer), sn = Math.sin(car.steer);
     const drag = st.cd * vLong * Math.abs(vLong);
     const roll = (Math.abs(vLong) > 0.3 ? sgnL : 0) * m * G * (st.crr + S.drag);
-    const Fx = FxF * cs - Fyf * sn + FxR - drag - roll;
+    const Fx = FxF * cs - Fyf * sn + FxR + Fnitro - drag - roll;
     const Fy = FxF * sn + Fyf * cs + Fyr - st.cd * 2 * vLat * Math.abs(vLat);
     const ax = Fx / m, ay = Fy / m;
     car.vx += (ax * fx + ay * rx) * dt; car.vz += (ax * fz + ay * rz) * dt;
