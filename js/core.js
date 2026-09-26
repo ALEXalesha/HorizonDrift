@@ -404,6 +404,9 @@
     const capF = mu * Nf, capR = mu * Nr * st.rearMul;
     let Fyf = tyre(aF, 0.15, capF);
     let Fyr = tyre(aR, 0.12, rearCap);
+    // на малой скорости модель увода неустойчива - плавно переходим к простому гашению бокового скольжения
+    const kLow = clamp((speed - 0.5) / 3, 0, 1);
+    if (kLow < 1) { const damp = -vLat * m * 8 * (1 - kLow); Fyf = Fyf * kLow + damp * 0.5; Fyr = Fyr * kLow + damp * 0.5; }
 
     // --- круг трения: тяга и торможение отнимают боковое сцепление. Антипробуксовка оставляет
     //     тяге только то, что не нужно шине в повороте ---
@@ -418,8 +421,6 @@
     if (uR > 1) FxR = Math.sign(FxR) * capR * 0.9;
     if (lockF) latF = 0.25;
     Fyf *= latF; Fyr *= latR;
-    const kLow = clamp((speed - 0.5) / 3, 0, 1);
-    if (kLow < 1) { const damp = -vLat * m * 8 * (1 - kLow); Fyf = Fyf * kLow + damp * 0.5; Fyr = Fyr * kLow + damp * 0.5; }
 
     const cs = Math.cos(car.steer), sn = Math.sin(car.steer);
     const drag = st.cd * vLong * Math.abs(vLong);
