@@ -303,22 +303,28 @@
     const key = new THREE.DirectionalLight(0xffffff, 1.1); key.position.set(4, 8, 5); sc.add(key);
     const rim = new THREE.DirectionalLight(0xff7a3a, 0.8); rim.position.set(-6, 3, -6); sc.add(rim);
     const floorTex = canvasTex(512, 512, (g, w) => {
-      g.fillStyle = '#121119'; g.fillRect(0, 0, w, w);
-      g.strokeStyle = 'rgba(255,120,40,0.18)'; g.lineWidth = 2;
+      g.fillStyle = '#0e0d14'; g.fillRect(0, 0, w, w);
+      g.strokeStyle = 'rgba(255,110,40,0.16)'; g.lineWidth = 2;
       for (let i = 0; i <= w; i += 32) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i, w); g.stroke(); g.beginPath(); g.moveTo(0, i); g.lineTo(w, i); g.stroke(); }
     }, true, true);
     floorTex.repeat.set(10, 10);
-    const floor = new THREE.Mesh(new THREE.CircleGeometry(40, 48), new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.35, metalness: 0.4, envMap: null }));
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(40, 48), new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.85, metalness: 0.1 }));
     floor.rotation.x = -Math.PI / 2; sc.add(floor);
-    const plat = new THREE.Mesh(new THREE.CylinderGeometry(3.6, 3.8, 0.18, 48), new THREE.MeshStandardMaterial({ color: 0x24222e, roughness: 0.4, metalness: 0.6 }));
+    const plat = new THREE.Mesh(new THREE.CylinderGeometry(3.6, 3.8, 0.18, 48), new THREE.MeshStandardMaterial({ color: 0x17161f, roughness: 0.55, metalness: 0.5, envMap: R.envMap, envMapIntensity: 0.4 }));
     plat.position.y = 0.09; sc.add(plat);
     const ring = new THREE.Mesh(new THREE.TorusGeometry(3.7, 0.04, 8, 64), new THREE.MeshBasicMaterial({ color: 0xff6a1a }));
     ring.rotation.x = Math.PI / 2; ring.position.y = 0.19; sc.add(ring);
-    // неоновые полосы на стене
-    for (let k = 0; k < 7; k++) {
-      const a = -1.2 + k * 0.4, bar = new THREE.Mesh(new THREE.BoxGeometry(0.12, 5, 0.12), new THREE.MeshBasicMaterial({ color: k % 2 ? 0xff5a1f : 0x9a4dff }));
-      bar.position.set(Math.sin(a) * 16, 2.5, -Math.cos(a) * 16); sc.add(bar);
-    }
+    // стена-полукруг с неоновыми полосами
+    const wallTex2 = canvasTex(1024, 256, (g, w, h) => {
+      const gr = g.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, '#07060c'); gr.addColorStop(1, '#161223'); g.fillStyle = gr; g.fillRect(0, 0, w, h);
+      g.fillStyle = 'rgba(255,255,255,0.03)'; for (let x = 0; x < w; x += 64) g.fillRect(x, 0, 2, h);
+      const line = (y, c, a) => { g.fillStyle = c; g.globalAlpha = a; g.fillRect(0, y, w, 3); g.globalAlpha = a * 0.25; g.fillRect(0, y - 4, w, 11); g.globalAlpha = 1; };
+      line(150, '#ff5a1f', 0.9); line(170, '#9a4dff', 0.7); line(60, '#19d3ff', 0.35);
+    }, true, true);
+    wallTex2.repeat.set(3, 1);
+    const wall = new THREE.Mesh(new THREE.CylinderGeometry(20, 20, 10, 64, 1, true), new THREE.MeshBasicMaterial({ map: wallTex2, side: THREE.BackSide }));
+    wall.position.y = 5; sc.add(wall);
+    const spot = new THREE.SpotLight(0xffe2c4, 0.7, 30, 0.5, 0.6, 1); spot.position.set(0, 9, 2); spot.target.position.set(0, 0, 0); sc.add(spot); sc.add(spot.target);
     const turn = new THREE.Group(); turn.position.y = 0.18; sc.add(turn);
     return { scene: sc, turn, car: null, angle: 0.6, spin: true, drag: 0, view: 'menu' };
   }
@@ -336,15 +342,21 @@
     const sr = R.showroom, cam = R.camera;
     if (sr.drag > 0) sr.drag -= dt; else sr.angle += dt * 0.35;
     sr.turn.rotation.y = sr.angle;
-    const wide = cam.aspect;
-    // меню: машина справа; гараж: машина в центре-справа, ближе
-    const off = sr.view === 'garage' ? 1.2 : 2.4;
-    const dist = sr.view === 'garage' ? 8.2 : 9.5;
-    cam.fov = 40; cam.near = 0.1; cam.far = 80; cam.updateProjectionMatrix();
-    const shift = off * Math.min(1.6, wide / 1.4);
-    cam.position.set(-shift + 5.2, 2.6, dist);
-    cam.lookAt(-shift, 0.7, 0);
+    // машина - в центре свободной части экрана: справа от меню или между списком и панелью гаража
+    const W = window.innerWidth, H = window.innerHeight;
+    let cx = W * 0.66, dist = 10.5;
+    if (sr.view === 'garage') {
+      const st = document.getElementById('gStage'), r = st && st.getBoundingClientRect();
+      if (r && r.width > 0) cx = r.left + r.width / 2;
+      dist = 9 + Math.max(0, 900 - (r ? r.width : 600)) / 150;
+    }
+    cam.fov = 38; cam.near = 0.1; cam.far = 80;
+    cam.setViewOffset(W, H, W / 2 - cx, 0, W, H);
+    cam.position.set(dist * 0.55, 2.5, dist * 0.85);
+    cam.lookAt(0, 0.75, 0);
+    cam.updateProjectionMatrix();
     R.renderer.render(sr.scene, cam);
+    cam.clearViewOffset();
   }
 
   // ======================= ТРАССА =======================
@@ -740,7 +752,7 @@
     const m = track(new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, vertexColors: true,
       uniforms: { map: { value: tex }, scale: { value: 600 } },
-      vertexShader: 'attribute float size; attribute float alpha; varying float va; varying vec3 vc; uniform float scale; void main(){ va = alpha; vc = color; vec4 mv = modelViewMatrix * vec4(position,1.0); gl_PointSize = size * scale / -mv.z; gl_Position = projectionMatrix * mv; }',
+      vertexShader: 'attribute float size; attribute float alpha; varying float va; varying vec3 vc; uniform float scale; void main(){ vc = color; vec4 mv = modelViewMatrix * vec4(position,1.0); float z = -mv.z; va = alpha * smoothstep(1.5, 5.0, z); gl_PointSize = min(size * scale / z, 220.0); gl_Position = projectionMatrix * mv; }',
       fragmentShader: 'uniform sampler2D map; varying float va; varying vec3 vc; void main(){ vec4 t = texture2D(map, gl_PointCoord); gl_FragColor = vec4(vc, t.a * va); }',
     }));
     track(g);
@@ -980,6 +992,16 @@
       X.arch.visible = !pl.finished; X.arch.material.opacity = 0.35 + 0.2 * Math.sin(X.time * 5);
     }
     if (X.water && !X.theme.water.ice) X.water.material.map.offset.set(X.time * 0.004, X.time * 0.002);
+    // соперник вплотную перед камерой становится полупрозрачным, чтобы не закрывать свою машину
+    race.cars.forEach((c, k) => {
+      if (c === pl || c.out) return;
+      const cm = X.cars[k], d = Math.hypot(c.x - R.camera.position.x, c.z - R.camera.position.z);
+      const fade = camMode !== 'hood' && d < 6.5;
+      if (cm.faded !== fade) {
+        cm.faded = fade;
+        cm.root.traverse((o) => { if (o.isMesh && o !== cm.blob) { const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach((m) => { m.transparent = fade; m.opacity = fade ? 0.35 : 1; m.depthWrite = !fade; }); } });
+      }
+    });
     // камера
     const cam = R.camera, st = X.cam;
     const pc = X.cars[race.cars.indexOf(pl)];

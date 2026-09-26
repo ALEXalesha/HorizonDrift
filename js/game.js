@@ -253,7 +253,6 @@
           };
           body.appendChild(d);
         }
-        body.insertAdjacentHTML('beforeend', `<p class="note">Сейчас: ${Math.round(cur.power)} кВт, ${Math.round(cur.top)} км/ч, сцепление ${cur.grip.toFixed(2)}, ${Math.round(cur.mass)} кг, нитро ${cur.nitro.toFixed(1)} с.</p>`);
       }
     } else {
       if (!owned) body.innerHTML = '<p class="note">Внешний вид меняется у машин в гараже.</p>';
@@ -324,7 +323,8 @@
     document.querySelectorAll('#sTabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === G.sTab));
     const seg = (key, items) => `<div class="seg" data-set="${key}">${items.map((it) => `<button data-v="${it[0]}" class="${String(s[key]) === String(it[0]) ? 'on' : ''}">${it[1]}</button>`).join('')}</div>`;
     const onoff = (key) => seg(key, [[true, 'Вкл'], [false, 'Выкл']]);
-    const range = (key, min, max, step) => `<input type="range" data-range="${key}" min="${min}" max="${max}" step="${step}" value="${s[key]}">`;
+    const pct = (key) => (key === 'steerSens' ? s[key].toFixed(2) : key === 'deadzone' ? Math.round(s[key] * 100) + '%' : Math.round(s[key] * 100) + '%');
+    const range = (key, min, max, step) => `<input type="range" data-range="${key}" min="${min}" max="${max}" step="${step}" value="${s[key]}"><span class="rv" data-rv="${key}">${pct(key)}</span>`;
     const row = (label, ctrl, sub) => `<div class="set"><div class="k">${label}${sub ? `<small>${sub}</small>` : ''}</div><div>${ctrl}</div></div>`;
     let h = '';
     if (G.sTab === 'sound') {
@@ -356,7 +356,7 @@
     body.querySelectorAll('[data-set]').forEach((el) => el.querySelectorAll('button').forEach((b) => {
       b.onclick = () => { let v = b.dataset.v; if (v === 'true') v = true; else if (v === 'false') v = false; setSetting(el.dataset.set, v); A.play('click'); buildSettings(); };
     }));
-    body.querySelectorAll('[data-range]').forEach((el) => { el.oninput = () => setSetting(el.dataset.range, Number(el.value)); });
+    body.querySelectorAll('[data-range]').forEach((el) => { el.oninput = () => { setSetting(el.dataset.range, Number(el.value)); const rv = body.querySelector(`[data-rv="${el.dataset.range}"]`); if (rv) rv.textContent = pct(el.dataset.range); }; });
     body.querySelectorAll('.keyslot').forEach((b) => { b.onclick = () => { G.rebinding = { action: b.dataset.act, slot: Number(b.dataset.slot), el: b }; b.classList.add('wait'); b.textContent = 'Нажмите…'; }; });
     const rs = $('sReset'); if (rs) rs.onclick = () => confirmBox('Сбросить прогресс?', 'Деньги, купленные машины, тюнинг и медали пропадут. Настройки и рекорды останутся. Отменить это нельзя.', () => {
       G.career = new C.Career(null, (d) => save(KEY.career, d)); save(KEY.career, G.career.d); toast('Прогресс сброшен'); buildSettings();
@@ -419,7 +419,7 @@
   function buildVictory() {
     A.music('victory');
     $('creditsRoll').innerHTML = `<h4>Horizon Drift</h4><p>Аркадные гонки для «Игротеки»</p>
-      <h4>Чемпион</h4><p>Вы - ${G.career.d.stats.wins} побед, ${money(G.career.d.stats.earned)} призовых</p>
+      <h4>Чемпион</h4><p>Это вы! Побед: ${G.career.d.stats.wins}, призовых: ${money(G.career.d.stats.earned)}</p>
       <h4>Трассы</h4><p>${D.TRACKS.map((t) => esc(t.name)).join(' · ')}</p>
       <h4>Машины</h4><p>${D.CARS.map((c) => esc(c.name)).join(' · ')}</p>
       <h4>Соперники</h4><p>${D.DRIVERS.join(' · ')}</p>
