@@ -282,7 +282,7 @@
 
   // Итоговые характеристики машины с тюнингом: база * (1 + доля из таблицы D.UPGRADES * уровень).
   function carStats(defOrId, upg) {
-    const def = typeof defOrId === 'string' ? carDef(defOrId) : defOrId;
+    const def = defOrId && typeof defOrId === 'object' ? defOrId : carDef(defOrId);
     const lv = upgradeLevels(upg);
     const base = { power: def.kw * 1000, top: def.top / 3.6, grip: def.grip, steer: def.steer, mass: def.mass, nitroCap: 2.6, nitroBoost: 0.32 };
     const st = {};
@@ -639,6 +639,12 @@
       if (c.isPlayer) this.events.push({ type: 'reset' });
     }
 
+    // Автопилот игрока (для проверок и снимков): едет как бот с темпом pace.
+    setAutopilot(c, pace) {
+      c.autopilot = pace > 0;
+      if (c.autopilot) { c.ai = newAi({ pace, nitro: true }); c.prof = speedProfile(this.track, c.st); } else c.ai = null;
+    }
+
     // Телепорт для проверок: машина в точке (s, d), скорость вдоль трассы.
     teleport(c, s, d, speed) {
       this.place(c, s, d || 0);
@@ -659,7 +665,7 @@
       for (const c of this.cars) {
         if (c.out) continue;
         c.hit = 0;
-        if (c.isPlayer && !c.finished && pin) {
+        if (c.isPlayer && !c.finished && pin && !c.autopilot) {
           const q = c.inp;
           q.thr = pin.thr || 0; q.brk = pin.brk || 0; q.steer = pin.steer || 0; q.hb = pin.hb ? 1 : 0; q.nitro = pin.nitro ? 1 : 0; q.analog = !!pin.analog;
           if (pin.shiftUp) { q.shiftUp = true; pin.shiftUp = false; }
