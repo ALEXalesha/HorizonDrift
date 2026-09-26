@@ -969,11 +969,11 @@
       if ((skid > 0.35 || (loose && c.speed > 8)) && Math.random() < pr) {
         const surfCol = c.surf === 'snow' || tr.runoffSurf === 'snowbank' && c.onRunoff ? [0.95, 0.97, 1] : loose ? (c.surf === 'gravel' ? [0.62, 0.53, 0.42] : [0.85, 0.74, 0.55]) : [0.86, 0.86, 0.88];
         for (const wp of wl) emit(X.parts, wp[0], c.y + 0.3, wp[1], -c.vx * 0.12 + (Math.random() - 0.5) * 2, 0.8 + Math.random(), -c.vz * 0.12 + (Math.random() - 0.5) * 2,
-          loose ? 1.2 : 1.6, loose ? 2.5 : 4, loose ? 0.9 : 1.6, surfCol[0], surfCol[1], surfCol[2], Math.min(0.75, 0.25 + skid * 0.5));
+          loose ? 1.0 : 1.2, loose ? 2.2 : 3, loose ? 0.8 : 1.3, surfCol[0], surfCol[1], surfCol[2], Math.min(0.42, 0.14 + skid * 0.3));
       }
       if (c.nitroOn && Math.random() < pr) {
         const ex = x + sn * (-cm.L / 2 - 0.1), ez = z + cs * (-cm.L / 2 - 0.1);
-        emit(X.parts, ex, c.y + 0.4, ez, -sn * 6, 0.3, -cs * 6, 0.7, -1.2, 0.18, 0.4, 0.7, 1, 0.9);
+        emit(X.parts, ex, c.y + 0.45, ez, -sn * 6 + c.vx * 0.8, 0.2, -cs * 6 + c.vz * 0.8, 0.28, -0.6, 0.12, 1, 0.55 + Math.random() * 0.3, 0.2, 0.85);
       }
       if (skid > 0.45 && !loose) {
         if (cm.lastWheels) for (let q = 0; q < 2; q++) addSkid(X.skids, cm.lastWheels[q][0], c.y + 0.03, cm.lastWheels[q][1], wl[q][0], c.y + 0.03, wl[q][1], 0.26);
