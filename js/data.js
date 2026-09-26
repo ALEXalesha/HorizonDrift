@@ -16,7 +16,7 @@
     { id: 'iskra', name: 'Искра', cls: 'Хэтчбек', price: 0, tier: 1, shape: 'hatch', drive: 'fwd',
       mass: 1050, kw: 105, top: 192, grip: 1.0, steer: 0.62, drift: 0.2, offroad: 1.06, launch: 0.85, aero: 0.05,
       color: '#e8412c', about: 'Лёгкий и послушный городской хэтчбек. С него всё начинается.' },
-    { id: 'kobalt', name: 'Кобальт R', cls: 'Купе', price: 9000, tier: 1, shape: 'coupe', drive: 'rwd',
+    { id: 'kobalt', name: 'Кобальт R', cls: 'Купе', price: 8000, tier: 1, shape: 'coupe', drive: 'rwd',
       mass: 1180, kw: 170, top: 214, grip: 1.1, steer: 0.6, drift: 0.55, offroad: 1.0, launch: 0.9, aero: 0.08,
       color: '#2f7dd8', about: 'Заднеприводное купе: быстрее «Искры» и охотно идёт боком.' },
     { id: 'vihr', name: 'Вихрь', cls: 'Дрифт-купе', price: 15000, tier: 2, shape: 'fastback', drive: 'rwd',
@@ -142,11 +142,11 @@
         { id: 'c1e2', type: 'drift', track: 'port', laps: 2, goal: [8000, 4500, 1800], name: 'Первый занос' },
         { id: 'c1e3', type: 'time', track: 'coast', laps: 1, ref: 'iskra', name: 'Круг у моря' },
       ] },
-    { id: 'c2', name: 'Кубок побережья', about: 'Быстрые виражи у моря и первая дуэль.', pace: 0.84, pool: ['kobalt', 'vihr', 'buran'], mult: 1.6,
+    { id: 'c2', name: 'Кубок побережья', about: 'Быстрые виражи у моря и первая дуэль.', pace: 0.82, pool: ['kobalt', 'vihr', 'buran'], mult: 1.6,
       events: [
         { id: 'c2e1', type: 'race', track: 'coast', laps: 2, opp: 4, name: 'Береговая гонка' },
         { id: 'c2e2', type: 'duel', track: 'port', laps: 2, name: 'Дуэль в порту' },
-        { id: 'c2e3', type: 'drift', track: 'city', laps: 2, goal: [12000, 7000, 3000], name: 'Неоновый дрифт' },
+        { id: 'c2e3', type: 'drift', track: 'city', laps: 2, goal: [11000, 6000, 2500], name: 'Неоновый дрифт' },
         { id: 'c2e4', type: 'time', track: 'serpentine', laps: 1, ref: 'kobalt', name: 'Подъём на время' },
       ] },
     { id: 'c3', name: 'Гравийный кубок', about: 'Пыль, гравий и скользкие повороты.', pace: 0.87, pool: ['buran', 'vihr', 'sapsan'], mult: 2.3,
@@ -156,14 +156,14 @@
         { id: 'c3e3', type: 'drift', track: 'desert', laps: 1, goal: [9500, 5500, 2500], name: 'Пыльный занос' },
         { id: 'c3e4', type: 'elim', track: 'desert', opp: 3, name: 'На вылет' },
       ] },
-    { id: 'c4', name: 'Зимний кубок', about: 'Снег и лёд: сцепления мало, ошибок много.', pace: 0.9, pool: ['buran', 'sapsan', 'taifun'], mult: 3,
+    { id: 'c4', name: 'Зимний кубок', about: 'Снег и лёд: сцепления мало, ошибок много.', pace: 0.87, pool: ['buran', 'sapsan', 'taifun'], mult: 3,
       events: [
         { id: 'c4e1', type: 'race', track: 'lake', laps: 2, opp: 4, name: 'Вокруг озера' },
         { id: 'c4e2', type: 'drift', track: 'pass', laps: 1, goal: [9000, 5500, 2500], name: 'Снежный вальс' },
         { id: 'c4e3', type: 'elim', track: 'lake', opp: 4, name: 'Ледяное выбывание' },
         { id: 'c4e4', type: 'duel', track: 'pass', laps: 1, name: 'Дуэль на перевале' },
       ] },
-    { id: 'c5', name: 'Гран-при Горизонта', about: 'Финал: лучшие гонщики и самые быстрые машины.', pace: 0.93, pool: ['sapsan', 'kometa', 'mirage'], mult: 4,
+    { id: 'c5', name: 'Гран-при Горизонта', about: 'Финал: лучшие гонщики и самые быстрые машины.', pace: 0.87, pool: ['sapsan', 'taifun', 'kometa'], mult: 4,
       events: [
         { id: 'c5e1', type: 'race', track: 'serpentine', laps: 1, opp: 5, name: 'Штурм серпантина' },
         { id: 'c5e2', type: 'elim', track: 'city', opp: 4, name: 'Последний в квартале' },
@@ -180,7 +180,7 @@
     elim: { name: 'На вылет', about: 'После каждого круга последний выбывает. Медаль за 1-3 место.' },
   };
 
-  const BASE_REWARD = 3000;
+  const BASE_REWARD = 3500;
   const PLACE_SHARE = [1, 0.6, 0.35, 0.15, 0.1, 0.05];       // доля награды за 1-6 место
   const MEDAL_SHARE = { gold: 1, silver: 0.6, bronze: 0.35, none: 0.1 };
 

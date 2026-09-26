@@ -952,7 +952,7 @@
     return null;
   }
   function newCareer() {
-    return { v: 1, money: 0, owned: ['iskra'], current: 'iskra', upg: {}, looks: {}, res: {}, victory: false,
+    return { v: 1, money: 2000, owned: ['iskra'], current: 'iskra', upg: {}, looks: {}, res: {}, victory: false,
       stats: { races: 0, wins: 0, earned: 0, spent: 0, driftBest: 0 } };
   }
   function defaultLook(carId) { const d = carDef(carId); return { color: d.color, color2: '#f4f4f4', rims: 'spoke5', rimColor: '#c9ced6', livery: 'none' }; }
@@ -1040,13 +1040,13 @@
     const rng = mulberry32(hashStr(evt.id) ^ (opts.seed || 0));
     const player = { name: 'Вы', car: opts.car, upg: opts.upg, look: opts.look, isPlayer: true };
     const upgFor = (lvl) => ({ engine: lvl, tyres: lvl, susp: lvl, weight: lvl, nitro: lvl });
-    const aiLvl = [0, 1, 1, 2, 3][ci] || 0;
+    const aiLvl = [0, 0, 1, 2, 2][ci] || 0;
     if (evt.type === 'time' || evt.type === 'drift') return [player];
     const entries = [];
     if (evt.type === 'duel') {
       const car = cup.pool[cup.pool.length - 1];
-      entries.push({ name: D.RIVALS[cup.id] || 'Соперник', car, upg: upgFor(Math.min(3, aiLvl + 1)), rival: true,
-        ai: { pace: clamp(cup.pace + diff.pace + 0.03, 0.6, 1.02), mistakes: diff.mistakes * 0.6, laneBase: 0 } });
+      entries.push({ name: D.RIVALS[cup.id] || 'Соперник', car, upg: upgFor(aiLvl), rival: true,
+        ai: { pace: clamp(cup.pace + diff.pace + 0.01, 0.6, 1.02), mistakes: diff.mistakes * 0.6, laneBase: 0 } });
       entries.push(player);
       return entries;
     }
@@ -1057,7 +1057,8 @@
       const spread = (k / Math.max(1, n - 1) - 0.5) * 0.04;          // соперники немного разные по силе
       entries.push({ name, car, upg: upgFor(aiLvl), ai: { pace: clamp(cup.pace + diff.pace + spread, 0.6, 1.02), mistakes: diff.mistakes, laneBase: (rng() - 0.5) * 1.6 } });
     }
-    entries.push(player);
+    // игрок стартует из середины сетки: впереди есть кого обгонять, но победа не безнадёжна
+    entries.splice(Math.floor(entries.length / 2), 0, player);
     return entries;
   }
 
