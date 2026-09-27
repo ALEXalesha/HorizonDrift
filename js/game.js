@@ -683,7 +683,11 @@
     try { saveRecords(res); } catch (e) { G.records = { tracks: {} }; }        // испорченные рекорды не должны отнять итоги и награду
     G.lastApply = m.kind === 'career' ? G.career.applyResult(m.evtId, res) : null;
     if (m.kind === 'worldDuel') {
-      const win = res.place === 1, reward = win ? m.reward : 0;
+      // призовые за дуэль с бродячим соперником - один раз в игровые сутки на соперника
+      const sv = G.world ? G.world.save : null, day = sv ? sv.day || 0 : 0;
+      const fresh = !sv || sv.duels[m.rival] !== day;
+      const win = res.place === 1, reward = win && fresh ? m.reward : 0;
+      if (win && sv) { sv.duels[m.rival] = day; saveWorld(); }
       if (reward) { G.career.d.money += reward; G.career.d.stats.earned += reward; G.career.save(G.career.d); }
       G.lastApply = { medal: null, reward, better: false, duel: true, win };
     }
@@ -820,6 +824,7 @@
   // Оболочки ОС (игра в iframe): {mix:'pause'} - как скрытая вкладка: пауза, тишина, ввод сброшен;
   // {mix:'resume'} - звук возвращается, а паузу снимает сам игрок.
   window.addEventListener('message', (e) => {
+    if (e.source !== window.parent) return;            // команды принимаются только от окна-оболочки
     const d = e && e.data; if (!d || typeof d !== 'object') return;
     if (d.mix === 'pause') {
       G.keys.clear(); clearInput();
@@ -969,10 +974,10 @@
       const b = document.createElement('button'); b.className = 'card mapcard' + (def.id === G.roamMap ? ' sel' : ''); b.dataset.map = def.id;
       b.innerHTML = `<h3>${esc(def.name)}</h3><div class="sub">${esc(def.about)}</div><canvas width="512" height="512"></canvas>
         <div class="kv"><span>Размер</span><b>${(M.half * 2 / 1000).toFixed(1)} × ${(M.half * 2 / 1000).toFixed(1)} км</b><span>Дорог</span><b>${(M.totalRoad / 1000).toFixed(0)} км</b>
-        <span>Из конца в конец</span><b>~${Math.round(mapSpanMinutes(M))} мин</b>
+        <span>Путь насквозь</span><b>~${Math.round(mapSpanMinutes(M))} мин</b>
         <span>Точки</span><b>${cnt.event || 0} соб. · ${cnt.radar || 0} рад. · ${cnt.drift || 0} дриф. · ${cnt.jump || 0} рамп</b>
         <span>Щиты</span><b>${got} / ${boards.length}</b><span>Открыто</span><b>${disc} / ${M.points.length}</b>
-        <span>По умолчанию</span><b>${hh(def.tod)} · ${WD.WEATHER[def.weather].name.toLowerCase()}</b>${sv.pos ? '<span>Сохранено</span><b>место на карте</b>' : ''}</div>`;
+        <span>Погода, время</span><b>${hh(def.tod)} · ${WD.WEATHER[def.weather].name.toLowerCase()}</b>${sv.pos ? '<span>Сохранено</span><b>место на карте</b>' : ''}</div>`;
       b.querySelector('canvas').getContext('2d').drawImage(mapImage(def.id).canvas, 0, 0);
       b.onclick = () => { G.roamMap = def.id; A.play('click'); buildRoam(); };
       g.appendChild(b);
@@ -1216,7 +1221,7 @@
     a.cool = 90;
     const entries = [{ name: a.name, car: a.car.carId, upg: { engine: 2, tyres: 2, susp: 2 }, look: aiLook(a.name), rival: true, ai: { pace: 0.9 + (D.DIFFICULTY[G.settings.difficulty] || D.DIFFICULTY.normal).pace, mistakes: 0.015 } },
       { name: 'Вы', car: carId, upg: G.career.d.upg[carId], look: G.career.look(carId), isPlayer: true }];
-    return startFromWorld(() => startRace({ track, mode: 'duel', laps: trackDef(track).closed ? 1 : 1, entries, seed: nextSeed(), assist: playerAssist() }, { kind: 'worldDuel', title: 'Дуэль: ' + a.name, reward: 1500 }));
+    return startFromWorld(() => startRace({ track, mode: 'duel', laps: trackDef(track).closed ? 1 : 1, entries, seed: nextSeed(), assist: playerAssist() }, { kind: 'worldDuel', title: 'Дуэль: ' + a.name, reward: 1500, rival: a.name }));
   }
 
   // ---------- фото-режим ----------

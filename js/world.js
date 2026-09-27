@@ -784,7 +784,7 @@
       }
       a.turned = false;
       const v = c.speed, E2 = M.edges[a.edge];
-      const la = Math.round((6 + v * 0.45) / E2.step), j = clamp(a.i + a.dir * la, E2.i0, E2.i1);
+      const la = Math.round((4.5 + v * 0.32) / E2.step), j = clamp(a.i + a.dir * la, E2.i0, E2.i1);
       let lane = a.dir * E2.hw * 0.48;
       // встречный впереди на той же стороне - прижаться вправо и сбросить скорость
       let oncoming = false;
@@ -794,7 +794,11 @@
         const face = Math.sin(c.h) * Math.sin(o.h) + Math.cos(c.h) * Math.cos(o.h);
         if (face < -0.3 && ahead > 0 && ahead < 60 && Math.abs(side) < 4) { oncoming = true; lane = a.dir * Math.min(E2.hw - 1.2, E2.hw * 0.7); }
       }
-      const tx = M.X[j] + (-M.TZ[j]) * lane, tz = M.Z[j] + M.TX[j] * lane;
+      // отклонение от своей полосы сейчас: цель сдвигается в обратную сторону, чтобы вернуться быстрее
+      const qh = M.nearestRoad(c.x, c.z, this.aiQ || (this.aiQ = {}));
+      const latErr = qh ? (qh.edge.id === a.edge ? qh.lat : 0) - lane : 0;
+      const aim = lane - clamp(latErr, -3, 3) * 0.6;
+      const tx = M.X[j] + (-M.TZ[j]) * aim, tz = M.Z[j] + M.TX[j] * aim;
       const fx = Math.sin(c.h), fz = Math.cos(c.h), dx = tx - c.x, dz = tz - c.z;
       const ang = Math.atan2(dx * -fz + dz * fx, Math.max(0.5, dx * fx + dz * fz)), dist = Math.hypot(dx, dz) || 1;
       const smax = c.st.steer / (1 + v / 30);
@@ -802,7 +806,7 @@
       // скорость: по кривизне впереди
       let vt = a.cruise;
       const sfHere = M.SF[a.i], wg = weatherOf(this.save.weather).grip[sfHere] || 1;
-      const mu = c.st.grip * C.surfMu(sfHere, c.st) * wg * 0.78, dec = mu * G * 0.55;
+      const mu = c.st.grip * C.surfMu(sfHere, c.st) * wg * 0.68, dec = mu * G * 0.5;
       for (let q = 0; q < 90; q += 3) {
         const k = clamp(a.i + a.dir * q, E2.i0, E2.i1), kap = M.K[k];
         if (kap > 1e-4) vt = Math.min(vt, Math.sqrt(mu * G / kap + 2 * dec * q * E2.step));
@@ -822,9 +826,10 @@
         vt = Math.min(vt, Math.sqrt(vj * vj + 2 * dec * left * E2.step));
       }
       if (oncoming) vt = Math.min(vt, a.cruise * 0.55);
-      // ушёл с дороги - медленно, пока не вернётся
-      const qn = M.nearestRoad(c.x, c.z, this.aiQ || (this.aiQ = {}));
+      // ушёл с дороги или с полосы - медленнее, пока не вернётся
+      const qn = qh;
       if (!qn || qn.d > qn.hw - 0.4) vt = Math.min(vt, qn && qn.d < qn.hw + 4 ? 12 : 7);
+      else if (Math.abs(latErr) > 1.2) vt *= 0.85;
       // перед узлом уступить тому, кто к нему ближе
       if (left * E2.step < 45) {
         const nd = M.nodes[a.dir > 0 ? E2.b : E2.a], mine = Math.hypot(nd.x - c.x, nd.z - c.z);
