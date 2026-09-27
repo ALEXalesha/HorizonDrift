@@ -202,7 +202,7 @@
         } else if (p.type === 'drift') {
           for (const i of [p.i0, p.i1]) {
             const e = M.edges[M.E[i]], x = M.X[i], z = M.Z[i], yy = M.Y[i], h = Math.atan2(M.TX[i], M.TZ[i]);
-            const arch = new THREE.Mesh(new THREE.TorusGeometry(e.hw + 1, 0.3, 8, 24, Math.PI), new THREE.MeshBasicMaterial({ color: 0xff5ad8 })); arch.position.set(x, yy, z); arch.rotation.y = h + Math.PI / 2; group.add(arch);
+            const arch = new THREE.Mesh(new THREE.TorusGeometry(e.hw + 1, 0.3, 8, 24, Math.PI), new THREE.MeshBasicMaterial({ color: 0xff5ad8 })); arch.position.set(x, yy, z); arch.rotation.y = h; group.add(arch);
           }
           sign('ЗОНА ДРИФТА', '#ff5ad8', M.X[p.i0], M.Y[p.i0] + 9, M.Z[p.i0], 0.8);
         } else if (p.type === 'jump') {
@@ -441,6 +441,9 @@
     W.water.position.x = Math.round(p.x / 1000) * 1000; W.water.position.z = Math.round(p.z / 1000) * 1000;
     W.water.material.map.offset.set(W.time * 0.004, W.time * 0.002);
     for (const r of Object.values(W.mat.road)) r.color.setScalar(wth === 'rain' ? 0.75 : 1);
+    // снегопад припорашивает землю: светлее рельеф и деревья
+    const snowK = wth === 'snow' ? (T.night ? 0.12 : 0.38) : 0;
+    W.mat.terrain.emissive.setRGB(snowK, snowK, snowK * 1.05); W.mat.prop.emissive.setRGB(snowK * 0.6, snowK * 0.6, snowK * 0.65);
     // осадки вокруг камеры
     W.rain.visible = wth === 'rain';
     if (W.rain.visible) {
@@ -453,7 +456,7 @@
       W.rain.geometry.attributes.position.needsUpdate = true;
     }
     const snowing = wth === 'snow' || (M.regionAt(p.x, p.z).biome === 'snow' && wth !== 'clear');
-    if (snowing) for (let k = 0; k < 8; k++) R._.emit(W.snowP, R.camera.position.x + (Math.random() - 0.5) * 90, R.camera.position.y + 25, R.camera.position.z + (Math.random() - 0.5) * 90, 0, -4, 0, 0.35, 0, 7, 1, 1, 1, 0.9);
+    if (snowing) for (let k = 0; k < 14; k++) R._.emit(W.snowP, R.camera.position.x + (Math.random() - 0.5) * 70, R.camera.position.y + 18, R.camera.position.z + (Math.random() - 0.5) * 70, (Math.random() - 0.5) * 2, -3.5, (Math.random() - 0.5) * 2, 0.7, 0, 6, 1, 1, 1, 0.95);
     R._.updateParticles(W.snowP, dt);
     // машины
     const cars = world.cars;

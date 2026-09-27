@@ -43,7 +43,7 @@
   // Области: elev - средняя высота, amp - холмистость, biome - природа, decor - что растёт и стоит,
   // track - трасса карьеры, чьи события доступны в этой области.
   const MAPS = [
-    { id: 'coast', name: 'Побережье', about: 'Город, порт, пляжи и прибрежное шоссе. Море на востоке и юге.', seed: 101, scale: 1.4, tod: 16, weather: 'clear',
+    { id: 'coast', name: 'Побережье', about: 'Город, порт, пляжи и прибрежное шоссе вдоль моря.', seed: 101, scale: 1.4, tod: 16, weather: 'clear',
       sea: [{ axis: 'x', from: 3150, to: 3500 }, { axis: '-z', from: 2750, to: 3100 }], lakes: [{ x: 2380, z: -1250, r: 380, depth: 7 }], peaks: [{ x: -600, z: -1650, r: 480, h: 75 }],
       regions: [
         { id: 'fest', name: 'Фестиваль', x: 0, z: 0, elev: 12, amp: 6, biome: 'grass', decor: ['tree', 'lamp'] },
@@ -335,7 +335,17 @@
     const P = [];
     const roadside = (i, side, off) => ({ x: X[i] + (-TZ[i]) * side * off, z: Z[i] + TX[i] * side * off });
     const nodeRoad = (k) => { const nd = nodes[k], e = edges[nd.edges[0]], i = e.a === k ? e.i0 + 18 : e.i1 - 18; return i; };
-    const fi = nodeRoad('F'), fp = roadside(fi, 1, edges[E[fi]].hw + 42);
+    // фестиваль: ровная площадка у узла F, не ближе 40 м ни к одной дороге
+    let fp = null, fi = nodeRoad('F');
+    for (let r = 50; r <= 170 && !fp; r += 10) {
+      for (let a = 0; a < 24 && !fp; a++) {
+        const x = nodes.F.x + Math.cos(a / 24 * 6.283) * r, z = nodes.F.z + Math.sin(a / 24 * 6.283) * r;
+        let dmin = 1e9; for (let k = 0; k < N; k += 2) dmin = Math.min(dmin, (X[k] - x) ** 2 + (Z[k] - z) ** 2);
+        if (Math.sqrt(dmin) > 40 && rawHeight(x, z) > WATER + 1) fp = { x, z };
+      }
+    }
+    if (!fp) fp = roadside(fi, 1, edges[E[fi]].hw + 42);
+    { let best = 1e18; for (let k = 0; k < N; k++) { const d = (X[k] - fp.x) ** 2 + (Z[k] - fp.z) ** 2; if (d < best) { best = d; fi = k; } } }
     P.push({ id: 'fest', type: 'fest', name: 'Фестиваль', x: fp.x, z: fp.z, i: fi, open: true });
     R.forEach((r) => {
       if (!r.track) return;
@@ -588,7 +598,7 @@
       p.autopilot = { car: p, edge: e.id, dir, i: q.i, cruise, rival: true, name: 'Вы' };
       p.assist = { tc: true, abs: true, steer: false, auto: true, sens: 1 };
     }
-    placeAtPoint(pid) { const p = this.M.pointById(pid); if (p) this.placeAt(p.x, p.z); }
+    placeAtPoint(pid) { const p = this.M.pointById(pid); if (!p) return; if (p.type === 'fest') { const i = p.i; this.placeAt(this.M.X[i], this.M.Z[i]); } else this.placeAt(p.x, p.z); }
     resetPlayer() { const c = this.player; this.placeAt(c.x, c.z, c.h); this.events.push({ type: 'reset' }); }
     // Быстрое перемещение: только к открытым точкам.
     fastTravel(pid) {
@@ -793,12 +803,13 @@
         if (pt.type === 'board') {
           if (!S.boards[pt.id] && d < 3.4 && Math.abs(p.y - pt.y) < 4) { S.boards[pt.id] = true; this.dirty = true; this.events.push({ type: 'board', point: pt, reward: 500 }); }
         } else if (pt.type === 'event' || pt.type === 'fest') {
-          if (d < 28) this.nearHub = pt;
+          if (d < (pt.type === 'fest' ? 70 : 28)) this.nearHub = pt;
         } else if (pt.type === 'radar') {
           const dc = Math.hypot(pt.cx - p.x, pt.cz - p.z);
           if (dc < 14) { if (!this.radarPass || this.radarPass.id !== pt.id) this.radarPass = { id: pt.id, v: 0 }; this.radarPass.v = Math.max(this.radarPass.v, p.speed * 3.6); }
           else if (this.radarPass && this.radarPass.id === pt.id && dc > 18) {
             const v = Math.round(this.radarPass.v), best = S.rec.radar[pt.id] || 0;
+            if (v < 30) { this.radarPass = null; continue; }            // не проезд, а стоянка рядом (или перемещение)
             if (v > best) { S.rec.radar[pt.id] = v; this.dirty = true; }
             this.events.push({ type: 'radar', point: pt, v, best: Math.max(v, best), record: v > best });
             this.radarPass = null;
