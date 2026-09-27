@@ -223,6 +223,30 @@
   @keyframes roll { from { transform: translateY(6vh); } to { transform: translateY(-100%); } }
   #confetti { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 
+
+  /* свободная езда */
+  #mapsGrid { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); align-content: start; }
+  .mapcard canvas { width: 100%; aspect-ratio: 1; display: block; border-radius: 10px; margin: 8px 0; background: #0c0b12; }
+  .mapcard .kv { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-size: 13px; color: var(--dim); margin-top: 6px; }
+  .mapcard .kv b { color: var(--text); font-weight: 600; text-align: right; }
+  .mapcard.sel { border-color: var(--acc); }
+  .roambar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 6px 0 10px; }
+  #hud.world #hInfo, #hud.world #hBoard, #hud.world #hCount, #hud.world #hWrong { display: none !important; }
+  #wInfo { top: 16px; left: 16px; padding: 10px 16px; min-width: 210px; display: none; }
+  #hud.world #wInfo { display: block; }
+  #wInfo .reg { font-size: 22px; font-weight: 800; font-style: italic; letter-spacing: 1px; }
+  #wPrompt { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); padding: 10px 18px; font-size: 16px; display: none; pointer-events: none; text-align: center; }
+  #wPrompt kbd { font-size: 15px; }
+  #wPhoto { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 30; display: none; padding: 10px 18px; background: rgba(10, 9, 18, 0.7); border-radius: 10px; font-size: 14px; }
+  #scrMap { background: rgba(8, 6, 16, 0.94); }
+  #scrMap .mapwrap { display: flex; gap: 16px; width: min(1400px, 96vw); height: 92vh; }
+  #bigMap { flex: 1; min-width: 0; height: 100%; border-radius: 14px; background: #0c0b12; cursor: crosshair; }
+  #mapSide { width: 290px; flex: 0 0 auto; display: flex; flex-direction: column; gap: 10px; overflow: auto; }
+  #mapSide label { display: flex; gap: 8px; align-items: center; font-size: 14px; cursor: pointer; }
+  #mapSide input[type=checkbox] { accent-color: var(--acc); width: 16px; height: 16px; }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  #hubList .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  #hubList .row .sub { color: var(--dim); font-size: 13px; }
   #modal .ovbox { max-width: 460px; text-align: center; }
   #modal p { color: #d6d2e4; line-height: 1.5; }
   #toast { position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%); z-index: 60; background: var(--panel2); border: 1px solid var(--acc); border-radius: 10px; padding: 10px 18px; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
@@ -251,6 +275,7 @@
   <div class="brand"><h1>Horizon<span>Drift</span></h1><p class="tag">аркадные гонки · дрифт · карьера</p></div>
   <nav class="mainnav">
     <button class="big" data-go="career">Карьера</button>
+    <button data-go="roam">Свободная езда</button>
     <button data-go="quick">Быстрая гонка</button>
     <button data-go="garage">Гараж</button>
     <button data-go="settings">Настройки</button>
@@ -273,6 +298,13 @@
   <div class="grid" id="eventsGrid"></div>
 </section>
 
+
+<section id="scrRoam" class="screen dark">
+  <div class="head"><button class="back" data-back>← Назад</button><h2>Свободная езда</h2><span class="sp"></span><span class="money" id="rMoney"></span></div>
+  <div class="roambar"><span class="lbl" style="margin:0">Машина</span><div class="seg" id="rCar"></div><span class="sp" style="flex:1"></span>
+    <label class="note"><input type="checkbox" id="rFest"> начать с фестиваля</label><button class="startbtn" id="rGo" style="margin:0;padding:10px 26px;font-size:18px">Поехать</button></div>
+  <div class="grid" id="mapsGrid"></div>
+</section>
 <section id="scrQuick" class="screen dark">
   <div class="head"><button class="back" data-back>← Назад</button><h2>Быстрая гонка</h2><span class="sp"></span><span class="note">Без призовых: для тренировки и рекордов</span></div>
   <div class="cols">
@@ -340,6 +372,10 @@
     <div id="hGoal"></div>
   </div>
   <div class="hbox" id="hBoard"></div>
+  <div class="hbox" id="wInfo"><div class="reg" id="wReg"></div><div class="hrow"><span class="k">ВРЕМЯ</span><span id="wTod"></span></div><div class="hrow"><span class="k">ПОГОДА</span><span id="wWeather"></span></div>
+    <div class="hrow"><span class="k">ЩИТЫ</span><span id="wBoards"></span></div><div class="hrow"><span class="k">ДЕНЬГИ</span><span id="wMoney"></span></div><div id="wHint" class="note" style="margin:4px 0 0">M - карта · F - фото</div></div>
+  <div class="hbox" id="wPrompt"></div>
+
   <div class="hbox" id="hMap"><canvas id="hMapC" width="190" height="190"></canvas></div>
   <div class="hbox" id="hSpeedo"><canvas id="hSpeedC" width="230" height="230"></canvas></div>
   <div class="hbox" id="hNitro"><span>НИТРО</span><i id="hNitroBar"></i></div>
@@ -373,6 +409,20 @@
   <div class="hbtns"><button class="pri" id="vMenu">В меню</button><button id="vGarage">Гараж</button></div>
 </section>
 
+
+<section id="scrMap" class="overlay"><div class="mapwrap"><canvas id="bigMap"></canvas><div id="mapSide">
+  <h2 style="text-align:left;font-size:26px;margin:0" id="mapTitle">Карта</h2>
+  <p class="note">Щелчок по открытой точке - быстрое перемещение. Закрытые точки открываются, когда подъедете ближе.</p>
+  <div class="lbl">Показывать</div><div id="mapFilters"></div>
+  <div class="lbl">Погода</div><div class="seg" id="mapWeather"></div>
+  <div class="lbl">Время суток</div><div class="seg" id="mapTod"></div>
+  <div class="lbl">Собрано</div><div id="mapStats" class="note"></div>
+  <button class="back" id="mapClose">Закрыть (M)</button></div></div></section>
+
+<section id="scrHub" class="overlay"><div class="ovbox" style="min-width:min(560px,94vw)">
+  <h2 id="hubTitle"></h2><p class="note" id="hubAbout" style="text-align:center"></p><div id="hubList"></div>
+  <div class="hbtns"><button id="hubClose">Назад в мир</button></div></div></section>
+<div id="wPhoto">Фото-режим · мышь - повернуть · колесо - ближе/дальше · <kbd>Enter</kbd> - сохранить снимок · <kbd>F</kbd> или <kbd>Esc</kbd> - выход</div>
 <section id="modal" class="overlay"><div class="ovbox"><h2 id="mdTitle"></h2><p id="mdText"></p><div class="hbtns"><button class="pri" id="mdYes">Да</button><button id="mdNo">Нет</button></div></div></section>
 <div id="toast"></div>
 
@@ -382,6 +432,8 @@
 <script src="js/core.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/render.js"></script>
+<script src="js/world.js"></script>
+<script src="js/worldrender.js"></script>
 <script src="js/game.js"></script>
 </body>
 </html>

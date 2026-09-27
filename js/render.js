@@ -18,8 +18,10 @@
   }
   function fbm(x, z) { return vnoise(x, z) * 0.55 + vnoise(x * 2.1, z * 2.1) * 0.28 + vnoise(x * 4.3, z * 4.3) * 0.17; }
   const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
-  const disposables = [];
+  let disposables = [];
   function track(o) { disposables.push(o); return o; }
+  // Собрать всё, что создано внутри fn, в отдельный список (для открытого мира со своим временем жизни).
+  function capture(fn) { const saved = disposables; disposables = []; try { const r = fn(); return { r, owned: disposables }; } finally { disposables = saved; } }
 
   function canvasTex(w, h, draw, repeat, keep) {
     const c = document.createElement('canvas'); c.width = w; c.height = h;
@@ -1074,6 +1076,8 @@
     return Math.abs((qx - cx) * dz - (qz - cz) * dx) / Math.sqrt(l2) < 2.4;
   }
   R.fadeBetween = fadeBetween;
+  R._ = { capture, canvasTex, surfaceTex, wallTex, PROPS, mergeGeoms, M4, buildingGeom, particleSystem, emit, updateParticles, skidSystem, addSkid,
+    buildCar, disposeCar, col, rngOf, getBlob, speckle, fbm };
   // Средняя яркость текстуры покрытия (для проверок: снег на дороге темнее сугробов).
   R.surfaceLuma = function (kind) {
     const t = surfaceTex(kind), c = t.image, g = c.getContext('2d'), d = g.getImageData(0, 0, c.width, c.height).data;

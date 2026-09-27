@@ -335,7 +335,7 @@
     const P = [];
     const roadside = (i, side, off) => ({ x: X[i] + (-TZ[i]) * side * off, z: Z[i] + TX[i] * side * off });
     const nodeRoad = (k) => { const nd = nodes[k], e = edges[nd.edges[0]], i = e.a === k ? e.i0 + 18 : e.i1 - 18; return i; };
-    const fi = nodeRoad('F'), fp = roadside(fi, 1, edges[E[fi]].hw + 26);
+    const fi = nodeRoad('F'), fp = roadside(fi, 1, edges[E[fi]].hw + 42);
     P.push({ id: 'fest', type: 'fest', name: 'Фестиваль', x: fp.x, z: fp.z, i: fi, open: true });
     R.forEach((r) => {
       if (!r.track) return;
@@ -431,7 +431,7 @@
       const x0 = cx * CHUNK, z0 = cz * CHUNK;
       const reg = M.regionAt(x0 + CHUNK / 2, z0 + CHUNK / 2);
       const decor = reg.decor || [];
-      const dens = { tree: 10, pine: reg.biome === 'forest' ? 30 : 14, snowpine: 18, palm: 8, cactus: 10, rock: 6 };
+      const dens = { tree: 22, pine: reg.biome === 'forest' ? 34 : 16, snowpine: 20, palm: 10, cactus: 12, rock: 7 };
       for (const type of decor) {
         if (!(type in dens)) continue;
         for (let n = 0; n < dens[type]; n++) {
@@ -509,6 +509,24 @@
     const M = buildMap(mapId);
     const disc = {}; for (const p of M.points) if (p.open) disc[p.id] = true;
     return { v: 1, map: mapId, pos: null, disc, boards: {}, rec: { radar: {}, drift: {}, jump: {} }, weather: M.def.weather, tod: M.def.tod, autoTime: true };
+  }
+
+  // Сохранение карты из хранилища: только известные точки, числа в пределах, положение внутри карты.
+  function sanitizeSave(mapId, raw) {
+    const M = buildMap(mapId), s = newSave(M.id), o = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    const ids = new Set(M.points.map((p) => p.id));
+    const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
+    const pos = obj(o.pos);
+    if ([pos.x, pos.z].every((v) => typeof v === 'number' && Number.isFinite(v) && Math.abs(v) < M.half)) s.pos = { x: pos.x, z: pos.z, h: Number.isFinite(pos.h) ? pos.h : 0 };
+    for (const k in obj(o.disc)) if (ids.has(k) && o.disc[k] === true) s.disc[k] = true;
+    for (const k in obj(o.boards)) if (ids.has(k) && k.startsWith('board-') && o.boards[k] === true) s.boards[k] = true;
+    const rec = obj(o.rec);
+    for (const t of ['radar', 'drift', 'jump']) for (const k in obj(rec[t])) { const n = Number(rec[t][k]); if (ids.has(k) && Number.isFinite(n) && n > 0) s.rec[t][k] = n; }
+    if (WEATHER[o.weather]) s.weather = o.weather;
+    if (typeof o.tod === 'number' && o.tod >= 0 && o.tod < 24) s.tod = o.tod;
+    if (typeof o.autoTime === 'boolean') s.autoTime = o.autoTime;
+    if (typeof o.car === 'string' && D.CARS.some((c) => c.id === o.car)) s.car = o.car;
+    return s;
   }
 
   function collidePair(a, b) {
@@ -773,7 +791,7 @@
         if (pt.type === 'board') {
           if (!S.boards[pt.id] && d < 3.4 && Math.abs(p.y - pt.y) < 4) { S.boards[pt.id] = true; this.dirty = true; this.events.push({ type: 'board', point: pt, reward: 500 }); }
         } else if (pt.type === 'event' || pt.type === 'fest') {
-          if (d < 18) this.nearHub = pt;
+          if (d < 28) this.nearHub = pt;
         } else if (pt.type === 'radar') {
           const dc = Math.hypot(pt.cx - p.x, pt.cz - p.z);
           if (dc < 14) { if (!this.radarPass || this.radarPass.id !== pt.id) this.radarPass = { id: pt.id, v: 0 }; this.radarPass.v = Math.max(this.radarPass.v, p.speed * 3.6); }
@@ -823,5 +841,5 @@
     }
   }
 
-  return { MAPS, ROAD, BIOME, WEATHER, WATER, CHUNK, buildMap, graphConnected, routeEdges, World, newSave, fbm, vnoise };
+  return { MAPS, ROAD, BIOME, WEATHER, WATER, CHUNK, buildMap, graphConnected, routeEdges, World, newSave, sanitizeSave, fbm, vnoise };
 });

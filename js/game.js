@@ -35,19 +35,20 @@
 
   // ======================= экраны =======================
   const SCREENS = { boot: 'scrBoot', main: 'scrMain', career: 'scrCareer', cup: 'scrCup', quick: 'scrQuick', garage: 'scrGarage', settings: 'scrSettings',
-    records: 'scrRecords', help: 'scrHelp', load: 'scrLoad', race: null, victory: 'scrVictory' };
+    records: 'scrRecords', help: 'scrHelp', load: 'scrLoad', race: null, victory: 'scrVictory', roam: 'scrRoam', world: null };
   function show(name, noPush) {
-    if (!noPush && G.screen !== name && G.screen !== 'boot' && G.screen !== 'load' && G.screen !== 'race') G.stack.push(G.screen);
+    if (!noPush && G.screen !== name && !['boot', 'load', 'race', 'world'].includes(G.screen)) G.stack.push(G.screen);
     G.screen = name;
     for (const k in SCREENS) if (SCREENS[k]) $(SCREENS[k]).classList.toggle('show', k === name);
-    $('hud').classList.toggle('show', name === 'race');
+    $('hud').classList.toggle('show', name === 'race' || name === 'world');
+    $('hud').classList.toggle('world', name === 'world');
     if (name !== 'race') { $('scrPause').classList.remove('show'); }
-    const build = { main: buildMain, career: buildCareer, cup: buildCup, quick: buildQuick, garage: buildGarage, settings: buildSettings, records: buildRecords, help: buildHelp, victory: buildVictory }[name];
+    const build = { roam: buildRoam, main: buildMain, career: buildCareer, cup: buildCup, quick: buildQuick, garage: buildGarage, settings: buildSettings, records: buildRecords, help: buildHelp, victory: buildVictory }[name];
     if (build) build();
-    if (['main', 'career', 'cup', 'quick', 'garage', 'settings', 'records', 'help'].includes(name) && !G.race) A.music('menu');
+    if (['main', 'career', 'cup', 'quick', 'garage', 'settings', 'records', 'help', 'roam'].includes(name) && !G.race && !G.world) A.music('menu');
   }
   function back() {
-    if (G.screen === 'settings' && G.settingsFromPause) { G.settingsFromPause = false; G.screen = 'race'; for (const k in SCREENS) if (SCREENS[k]) $(SCREENS[k]).classList.remove('show'); $('hud').classList.add('show'); $('scrPause').classList.add('show'); return; }
+    if (G.screen === 'settings' && G.settingsFromPause) { G.settingsFromPause = false; G.screen = G.world && !G.race ? 'world' : 'race'; for (const k in SCREENS) if (SCREENS[k]) $(SCREENS[k]).classList.remove('show'); $('hud').classList.add('show'); $('scrPause').classList.add('show'); return; }
     const prev = G.stack.pop() || 'main';
     show(prev, true);
   }
@@ -488,9 +489,13 @@
     A.silenceRace();
     $('scrResults').classList.remove('show'); $('scrPause').classList.remove('show');
   }
-  function quitToMenu() { stopRace(); G.stack = []; show('main'); }
+  function quitToMenu() { stopRace(); if (G.world) quitWorld(true); G.fromWorld = false; G.stack = []; show('main'); }
   function setPaused(p) {
-    if (!G.race || G.screen !== 'race' || G.resultShown) return;
+    const inWorld = G.world && G.screen === 'world';
+    if (!inWorld && (!G.race || G.screen !== 'race' || G.resultShown)) return;
+    if (inWorld && G.overlay === 'photo') WR.photoMode(false), G.overlay = null, $('hud').style.visibility = '', $('wPhoto').style.display = 'none';
+    if (inWorld && p) { closeOverlay(); saveWorld(); }
+    $('pRestart').textContent = inWorld ? 'На фестиваль' : 'Заново';
     G.paused = p;
     $('scrPause').classList.toggle('show', p);
     G.keys.clear(); clearInput();
@@ -502,15 +507,16 @@
   $('hPauseBtn').onclick = (e) => { e.currentTarget.blur(); setPaused(true); };
   $('pResume').onclick = () => setPaused(false);
   $('pSettings').onclick = () => { G.settingsFromPause = true; $('scrPause').classList.remove('show'); G.stack = []; G.screen = 'settings'; $('hud').classList.remove('show'); $('scrSettings').classList.add('show'); buildSettings(); };
-  $('pRestart').onclick = () => restart();
-  $('pMenu').onclick = () => quitToMenu();
+  $('pRestart').onclick = () => { if (G.world && !G.race) { setPaused(false); worldTravel('fest'); } else restart(); };
+  $('pMenu').onclick = () => { if (G.world) quitWorld(true); quitToMenu(); };
   function restart() { const cfg = Object.assign({}, G.cfg, { seed: nextSeed() }); startRace(cfg, G.meta); }
   $('resAgain').onclick = () => restart();
   $('resMenu').onclick = () => quitToMenu();
   $('resNext').onclick = () => {
     const m = G.meta, vict = G.lastApply && G.lastApply.victory;
     stopRace();
-    if (vict) { G.stack = ['main']; show('victory', true); return; }
+    if (vict) { if (G.world) quitWorld(true); G.stack = ['main']; show('victory', true); return; }
+    if (G.fromWorld && G.world) { G.fromWorld = false; resumeWorld(); return; }
     if (m && m.kind === 'career') { G.stack = ['main', 'career']; show('cup', true); } else { G.stack = ['main']; show('quick', true); }
   };
 
@@ -676,6 +682,11 @@
     res.thresholds = m.thresholds || null;
     try { saveRecords(res); } catch (e) { G.records = { tracks: {} }; }        // испорченные рекорды не должны отнять итоги и награду
     G.lastApply = m.kind === 'career' ? G.career.applyResult(m.evtId, res) : null;
+    if (m.kind === 'worldDuel') {
+      const win = res.place === 1, reward = win ? m.reward : 0;
+      if (reward) { G.career.d.money += reward; G.career.d.stats.earned += reward; G.career.save(G.career.d); }
+      G.lastApply = { medal: null, reward, better: false, duel: true, win };
+    }
     G.lastResult = res;
   }
   function showResults() {
@@ -698,6 +709,7 @@
     if (ap && ap.better) ban += `<div class="banner">Новая медаль: ${MEDAL_RU[ap.medal]}!</div>`;
     if (ap && ap.unlocked) ban += `<div class="banner">Открыт кубок «${esc(ap.unlocked.name)}»!</div>`;
     if (ap && ap.victory) ban += '<div class="banner">Все кубки пройдены - вы чемпион!</div>';
+    if (ap && ap.duel) ban += ap.win ? '<div class="banner">Дуэль выиграна!</div>' : '<div class="banner" style="background:rgba(255,74,90,0.15);color:#ffc6cb">Дуэль проиграна - соперник ещё встретится в мире</div>';
     if (m.kind === 'career' && !medal) ban += '<div class="banner" style="background:rgba(255,74,90,0.15);color:#ffc6cb">Медали нет - попробуйте ещё раз или улучшите машину в гараже</div>';
     $('resBanners').innerHTML = ban;
     if (res.table.length > 1) {
@@ -710,7 +722,7 @@
       h += '</table>' + (res.table.some((r) => r.est) ? '<p class="note">* по темпу: соперник ещё не доехал</p>' : '');
       $('resTable').innerHTML = h;
     } else $('resTable').innerHTML = '';
-    $('resNext').textContent = ap && ap.victory ? 'К награде' : 'Дальше';
+    $('resNext').textContent = ap && ap.victory ? 'К награде' : G.fromWorld ? 'Вернуться в мир' : 'Дальше';
     $('scrResults').classList.add('show');
     if (medal) A.play('medal');
     setTimeout(() => $('resNext').focus(), 0);
@@ -730,6 +742,19 @@
       return;
     }
     if ($('modal').classList.contains('show')) { if (e.code === 'Escape') $('modal').classList.remove('show'); return; }
+    if (G.screen === 'world' && G.world) {
+      const act = actionFor(e.code);
+      if (act || ['Escape', 'KeyM', 'KeyF', 'KeyE', 'Enter'].includes(e.code)) e.preventDefault();
+      if (worldKey(e, act)) return;
+      if (e.code === 'Escape' || act === 'pause') { if (!e.repeat) setPaused(!G.paused); return; }
+      if (G.paused) return;
+      G.keys.add(e.code);
+      if (e.repeat) return;
+      if (act === 'camera') { const order = ['chase', 'far', 'hood']; G.camMode = order[(order.indexOf(G.camMode) + 1) % order.length]; showMsg({ chase: 'Камера сзади', far: 'Дальняя камера', hood: 'Камера с капота' }[G.camMode], '', 700); }
+      if (act === 'shiftUp') G.input.shiftUp = true;
+      if (act === 'shiftDown') G.input.shiftDown = true;
+      return;
+    }
     if (G.screen === 'race' && G.race) {
       const act = actionFor(e.code);
       if (act || e.code === 'Escape') e.preventDefault();
@@ -747,7 +772,7 @@
     if (e.code === 'Escape' && !['main', 'boot', 'load'].includes(G.screen)) { if (G.screen === 'victory') show('main'); else back(); }
   });
   document.addEventListener('keyup', (e) => { G.keys.delete(e.code); });
-  window.addEventListener('blur', () => { G.keys.clear(); clearInput(); if (G.race && G.screen === 'race' && !G.paused && !G.resultShown && !G.manual) setPaused(true); });
+  window.addEventListener('blur', () => { G.keys.clear(); clearInput(); if (((G.race && G.screen === 'race' && !G.resultShown) || (G.world && G.screen === 'world')) && !G.paused && !G.manual) setPaused(true); });
   document.addEventListener('pointerdown', () => A.init());
 
   let padPrev = [];
@@ -766,12 +791,13 @@
       thr = Math.max(thr, bv(7)); brk = Math.max(brk, bv(6));
       if (bv(2) > 0.5) hb = 1; if (bv(0) > 0.5) nitro = 1;
       const edge = (i) => bv(i) > 0.5 && !padPrev[i];
-      if (G.screen === 'race' && G.race) {
+      if ((G.screen === 'race' && G.race) || (G.screen === 'world' && G.world)) {
         if (edge(9)) setPaused(!G.paused);
         if (!G.paused) {
           if (edge(3)) { const order = ['chase', 'far', 'hood']; G.camMode = order[(order.indexOf(G.camMode) + 1) % order.length]; }
           if (edge(5)) inp.shiftUp = true; if (edge(4)) inp.shiftDown = true;
-          if (edge(8) && G.race.player && G.race.phase === 'race') G.race.resetCar(G.race.player);
+          if (edge(8) && G.race && G.race.player && G.race.phase === 'race') G.race.resetCar(G.race.player);
+          if (edge(8) && G.world && !G.race) G.world.resetPlayer();
         }
       }
       padPrev = p.buttons.map((b) => (b.value || (b.pressed ? 1 : 0)) > 0.5);
@@ -782,7 +808,8 @@
   // ======================= вкладка скрыта =======================
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
-      if (G.race && G.screen === 'race' && !G.paused && !G.resultShown) setPaused(true);
+      if (((G.race && G.screen === 'race' && !G.resultShown) || (G.world && G.screen === 'world')) && !G.paused) setPaused(true);
+      if (G.world) saveWorld();
       A.suspend();
     } else {
       A.resume();                                  // звук меню возвращается; заезд остаётся на паузе
@@ -792,6 +819,10 @@
 
   // ======================= цикл =======================
   function snapshot(race) { for (const c of race.cars) { c.ix = c.x; c.iz = c.z; c.ih = c.h; } }
+  function stepWorld(n, input) {
+    const w = G.world;
+    for (let i = 0; i < n; i++) { for (const c of w.cars) { c.ix = c.x; c.iz = c.z; c.iy = c.y; c.ih = c.h; } w.step(C.DT, input || G.input); handleWorldEvents(); if (!G.world) break; }
+  }
   function stepRace(n) {
     const race = G.race;
     for (let i = 0; i < n; i++) { snapshot(race); race.step(C.DT, G.input); handleEvents(); }
@@ -813,8 +844,25 @@
       alpha = G.acc / C.DT;
       if (G.doneT > 0) { G.doneT -= dt; if (G.doneT <= 0 && !G.resultShown) showResults(); }
     }
+    if (G.world && G.screen === 'world' && !G.paused && !G.manual && !G.overlay) {
+      G.acc = (G.acc || 0) + dt;
+      let n = 0;
+      while (G.acc >= C.DT && n < 12) { stepWorld(1); G.acc -= C.DT; n++; }
+      if (n >= 12) G.acc = 0;
+      alpha = G.acc / C.DT;
+      if (G.world && G.world.dirty && performance.now() - (G.worldSavedAt || 0) > 3000) saveWorld();
+    }
     const tSim = performance.now();
-    if (G.race) {
+    if (G.world && WR.world && !G.race) {
+      WR.frame(dt, G.manual || G.paused || G.overlay ? 1 : alpha, G.camMode);
+      if (G.screen === 'world') {
+        updateWorldHud();
+        const pl = G.world.player; let near = null;
+        for (const c of G.world.cars) { if (c === pl) continue; const d = Math.hypot(c.x - pl.x, c.z - pl.z); if (!near || d < near.dist) near = { car: c, dist: d }; }
+        A.updateRace(pl, near, G.paused || !!G.overlay);
+        drawFx(G.overlay ? null : pl);
+      }
+    } else if (G.race) {
       R.frame(dt, G.manual ? 1 : alpha, G.camMode);
       if (G.screen === 'race') {
         updateHud(dt);
@@ -830,6 +878,369 @@
   }
 
   window.addEventListener('resize', () => R.resize());
+
+  // ======================= СВОБОДНАЯ ЕЗДА =======================
+  const WD = window.DriftWorld, WR = window.DriftWorldRender;
+  const WKEY = (id) => 'mix.drift.world.' + id;
+  const loadWorldSave = (id) => WD.sanitizeSave(id, load(WKEY(id)));
+  function saveWorld() {
+    if (!G.world) return;
+    try { localStorage.setItem(WKEY(G.world.M.id), JSON.stringify(G.world.save)); localStorage.setItem('mix.drift.worldlast', JSON.stringify(G.world.M.id)); } catch (e) { /* нет хранилища */ }
+    G.world.dirty = false; G.worldSavedAt = performance.now();
+  }
+  // Снимок карты с высоты: рельеф с отмывкой, вода, дороги. Один раз на карту.
+  const mapImgCache = {};
+  function mapImage(id) {
+    if (mapImgCache[id]) return mapImgCache[id];
+    const M = WD.buildMap(id), size = 512, cv = document.createElement('canvas'); cv.width = cv.height = size;
+    const g = cv.getContext('2d'), img = g.createImageData(size, size), cells = 256, px = size / cells, span = M.half * 2, c = [0, 0, 0];
+    const hs = new Float32Array((cells + 1) * (cells + 1));
+    for (let j = 0; j <= cells; j++) for (let i = 0; i <= cells; i++) hs[j * (cells + 1) + i] = M.rawHeight(-M.half + i / cells * span, -M.half + j / cells * span);
+    for (let j = 0; j < cells; j++) {
+      for (let i = 0; i < cells; i++) {
+        const x = -M.half + (i + 0.5) / cells * span, z = -M.half + (j + 0.5) / cells * span, h = hs[j * (cells + 1) + i];
+        let r, gg, b;
+        if (h < WD.WATER) { const d = Math.min(1, -h / 14); r = 0.16 - d * 0.08; gg = 0.42 - d * 0.14; b = 0.62 - d * 0.1; }
+        else {
+          M.biomeColor(x, z, c); const shade = C.clamp(1 + (hs[j * (cells + 1) + i] - hs[(j + 1) * (cells + 1) + i + 1]) * 0.05, 0.6, 1.35);
+          r = c[0] * shade; gg = c[1] * shade; b = c[2] * shade;
+          if (h > 95) { const t = Math.min(1, (h - 95) / 25); r += (0.95 - r) * t; gg += (0.96 - gg) * t; b += (0.98 - b) * t; }
+        }
+        for (let yy = 0; yy < px; yy++) for (let xx = 0; xx < px; xx++) {
+          // север вверху: x на карте мира - влево, z - вниз, как на мини-карте трасс
+          const X = size - 1 - (i * px + xx), Y = size - 1 - (j * px + yy), k = (Y * size + X) * 4;
+          img.data[k] = r * 255; img.data[k + 1] = gg * 255; img.data[k + 2] = b * 255; img.data[k + 3] = 255;
+        }
+      }
+    }
+    g.putImageData(img, 0, 0);
+    const toC = (x, z) => [size - (x + M.half) / span * size, size - (z + M.half) / span * size];   // север (+z) вверху, как видит водитель
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    for (const e of M.edges) {
+      g.strokeStyle = e.type === 'highway' ? '#ffd26a' : e.surf === 'gravel' ? '#a8845a' : e.surf === 'snow' ? '#dfe7f2' : '#f4f4f4';
+      g.lineWidth = e.type === 'highway' ? 3 : 2;
+      g.beginPath(); for (let i = e.i0; i <= e.i1; i += 6) { const p = toC(M.X[i], M.Z[i]); i === e.i0 ? g.moveTo(p[0], p[1]) : g.lineTo(p[0], p[1]); } g.stroke();
+    }
+    const res = { canvas: cv, toC, size, M };
+    mapImgCache[id] = res;
+    return res;
+  }
+  // Сколько минут ехать из конца в конец по дорогам (самый длинный кратчайший путь между узлами) на 110 км/ч.
+  const spanCache = {};
+  function mapSpanMinutes(M) {
+    if (spanCache[M.id]) return spanCache[M.id];
+    const ids = Object.keys(M.nodes); let worst = 0;
+    for (const s0 of ids) {
+      const dist = {}; ids.forEach((k) => { dist[k] = Infinity; }); dist[s0] = 0; const done = new Set();
+      while (done.size < ids.length) {
+        let u = null; for (const k of ids) if (!done.has(k) && (u === null || dist[k] < dist[u])) u = k;
+        if (dist[u] === Infinity) break; done.add(u);
+        for (const ei of M.nodes[u].edges) { const e = M.edges[ei], v = e.a === u ? e.b : e.a; if (dist[u] + e.len < dist[v]) dist[v] = dist[u] + e.len; }
+      }
+      for (const k of ids) if (dist[k] < Infinity) worst = Math.max(worst, dist[k]);
+    }
+    return (spanCache[M.id] = worst / (110 / 3.6) / 60);
+  }
+  const hh = (t) => { const h = Math.floor(t), m = Math.floor((t - h) * 60); return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m; };
+
+  function buildRoam() {
+    $('rMoney').textContent = money(G.career.money);
+    if (!G.roamMap) { const last = load('mix.drift.worldlast'); G.roamMap = WD.MAPS.some((m) => m.id === last) ? last : WD.MAPS[0].id; }
+    if (!G.roamCar || !G.career.owns(G.roamCar)) G.roamCar = G.career.d.current;
+    const cs = $('rCar'); cs.innerHTML = '';
+    for (const id of G.career.d.owned) { const b = document.createElement('button'); b.textContent = C.carDef(id).name; b.className = id === G.roamCar ? 'on' : ''; b.onclick = () => { G.roamCar = id; A.play('click'); buildRoam(); }; cs.appendChild(b); }
+    const g = $('mapsGrid'); g.innerHTML = '';
+    for (const def of WD.MAPS) {
+      const M = WD.buildMap(def.id), sv = loadWorldSave(def.id), cnt = {}, boards = M.points.filter((p) => p.type === 'board');
+      M.points.forEach((p) => { cnt[p.type] = (cnt[p.type] || 0) + 1; });
+      const got = boards.filter((p) => sv.boards[p.id]).length, disc = M.points.filter((p) => sv.disc[p.id]).length;
+      const b = document.createElement('button'); b.className = 'card mapcard' + (def.id === G.roamMap ? ' sel' : ''); b.dataset.map = def.id;
+      b.innerHTML = `<h3>${esc(def.name)}</h3><div class="sub">${esc(def.about)}</div><canvas width="512" height="512"></canvas>
+        <div class="kv"><span>Размер</span><b>${(M.half * 2 / 1000).toFixed(1)} × ${(M.half * 2 / 1000).toFixed(1)} км</b><span>Дорог</span><b>${(M.totalRoad / 1000).toFixed(0)} км</b>
+        <span>Из конца в конец</span><b>~${Math.round(mapSpanMinutes(M))} мин</b>
+        <span>Точки</span><b>${cnt.event || 0} соб. · ${cnt.radar || 0} рад. · ${cnt.drift || 0} дриф. · ${cnt.jump || 0} рамп</b>
+        <span>Щиты</span><b>${got} / ${boards.length}</b><span>Открыто</span><b>${disc} / ${M.points.length}</b>
+        <span>По умолчанию</span><b>${hh(def.tod)} · ${WD.WEATHER[def.weather].name.toLowerCase()}</b>${sv.pos ? '<span>Сохранено</span><b>место на карте</b>' : ''}</div>`;
+      b.querySelector('canvas').getContext('2d').drawImage(mapImage(def.id).canvas, 0, 0);
+      b.onclick = () => { G.roamMap = def.id; A.play('click'); buildRoam(); };
+      g.appendChild(b);
+    }
+    R.showroomView('menu'); R.setShowroomCar(G.roamCar, G.career.look(G.roamCar));
+  }
+  $('rGo').onclick = () => { A.init(); startWorld(G.roamMap, G.roamCar, $('rFest').checked); };
+
+  async function startWorld(mapId, carId, fromFest) {
+    if (G.loading) return null;
+    G.loading = true;
+    try {
+      A.init(); stopRace();
+      const def = WD.MAPS.find((m) => m.id === mapId) || WD.MAPS[0];
+      carId = G.career.owns(carId) ? carId : G.career.d.current;
+      $('loadName').textContent = def.name; $('loadPlace').textContent = 'Свободная езда · ' + C.carDef(carId).name;
+      $('loadTip').textContent = 'M - большая карта с быстрым перемещением, E - события и дуэли, F - фото-режим, R - вернуться на дорогу.';
+      const lm = $('loadMap'), lg = lm.getContext('2d'); lg.clearRect(0, 0, lm.width, lm.height); lg.drawImage(mapImage(def.id).canvas, (lm.width - lm.height) / 2, 0, lm.height, lm.height);
+      $('loadBar').style.width = '30%'; show('load');
+      await new Promise((r) => setTimeout(r, 0));
+      const save = loadWorldSave(def.id); if (fromFest) save.pos = null; save.car = carId;
+      if (G.world && G.world.M.id !== def.id) quitWorld(true);
+      G.world = new WD.World({ map: def.id, car: carId, upg: G.career.d.upg[carId], look: G.career.look(carId), save, seed: nextSeed(), assist: playerAssist() });
+      $('loadBar').style.width = '60%';
+      await new Promise((r) => setTimeout(r, 0));
+      WR.init(G.world, G.settings);
+      $('loadBar').style.width = '100%';
+      enterWorldScreen();
+      saveWorld();
+      return G.world;
+    } finally { G.loading = false; }
+  }
+  function enterWorldScreen() {
+    G.paused = false; G.overlay = null; G.acc = 0; G.camMode = G.settings.camera;
+    for (const k in hudCache) delete hudCache[k];
+    $('hud').classList.add('world');
+    $('hDriftRow').style.display = 'none';
+    show('world');
+    A.music('race');
+    updateKeysHint();
+  }
+  function resumeWorld() {
+    if (!G.world) { show('main'); return; }
+    stopRace();
+    WR.init(G.world, G.settings);
+    enterWorldScreen();
+  }
+  function quitWorld(keepScreen) {
+    if (G.world) saveWorld();
+    WR.dispose(); G.world = null; G.overlay = null; WR.photoMode(false);
+    $('hud').classList.remove('world'); $('wPhoto').style.display = 'none';
+    ['scrMap', 'scrHub'].forEach((id) => $(id).classList.remove('show'));
+    if (!keepScreen) { G.stack = []; show('main'); }
+  }
+
+  // ---------- события мира ----------
+  let discMsgT = 0;
+  function handleWorldEvents() {
+    const w = G.world; if (!w) return;
+    const p = w.player;
+    for (const e of p.events) if (e === 'up' || e === 'down') A.play('shift');
+    for (const e of w.events) {
+      switch (e.type) {
+        case 'board':
+          G.career.d.money += e.reward; G.career.d.stats.earned += e.reward; G.career.save(G.career.d);
+          A.play('bank'); WR.breakBoard(e.point);
+          { const c = w.counts(); showMsg(`Щит разбит! +${money(e.reward)}`, `собрано ${c.boards} из ${c.boardsAll}`, 1800); }
+          saveWorld(); break;
+        case 'radar': A.play(e.record ? 'medal' : 'cp'); showMsg(`Радар: ${Math.round(C.toUnits(e.v / 3.6, G.settings.units))} ${G.settings.units === 'mph' ? 'mph' : 'км/ч'}`, e.record ? 'новый рекорд!' : 'рекорд ' + Math.round(C.toUnits(e.best / 3.6, G.settings.units)), 2000); saveWorld(); break;
+        case 'zoneIn': A.play('cp'); showMsg('Зона дрифта', 'заносы до конца зоны - в рекорд', 1400); break;
+        case 'zoneOut': A.play(e.record ? 'medal' : 'bank'); showMsg(`Дрифт: ${e.pts.toLocaleString('ru-RU')}`, e.record ? 'новый рекорд зоны!' : 'рекорд ' + e.best.toLocaleString('ru-RU'), 2000); saveWorld(); break;
+        case 'jump': A.play(e.record ? 'medal' : 'bank'); showMsg(`Прыжок: ${e.dist.toFixed(1)} м`, e.record ? 'новый рекорд!' : 'рекорд ' + e.best.toFixed(1) + ' м', 2000); saveWorld(); break;
+        case 'discover': if (e.point.type !== 'board' && performance.now() - discMsgT > 2500) { discMsgT = performance.now(); showMsg('Открыто: ' + e.point.name, 'точка появилась на карте', 1400); } break;
+        case 'water': showMsg('Машина в воде', 'возвращаем на дорогу', 1400); break;
+        case 'reset': showMsg('Снова на дороге', '', 900); break;
+        case 'comboLost': A.play('lost'); showMsg('Комбо сорвано!', '', 1100); break;
+        default: break;
+      }
+    }
+    for (const c of w.cars) if (c.hit > 2.5 && Math.hypot(c.x - p.x, c.z - p.z) < 30) A.play('hit', c.hit);
+    w.events.length = 0;
+  }
+
+  // ---------- HUD мира ----------
+  let wmapCache = null;
+  function drawWorldMinimap() {
+    const w = G.world, M = w.M, p = w.player, cv = $('hMapC'), g = cv.getContext('2d'), s = cv.width, sc = 0.32;
+    g.clearRect(0, 0, s, s);
+    g.save(); g.translate(s / 2, s / 2); g.rotate(-Math.PI / 2 - Math.atan2(-Math.cos(p.h), -Math.sin(p.h))); // курс вверх
+    const [cx, cz] = M.chunkOf(p.x, p.z), k = cx + ',' + cz;
+    if (!wmapCache || wmapCache.k !== k || wmapCache.map !== M.id) {
+      const segs = []; for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) segs.push(...M.roadSamplesIn(cx + ox, cz + oz, 0));
+      wmapCache = { k, map: M.id, segs };
+    }
+    const T = (x, z) => [-(x - p.x) * sc, -(z - p.z) * sc];
+    g.strokeStyle = 'rgba(255,255,255,0.8)'; g.lineCap = 'round';
+    for (const i of wmapCache.segs) { const e = M.edges[M.E[i]]; g.lineWidth = e.type === 'highway' ? 4 : 2.5; g.strokeStyle = e.type === 'highway' ? '#ffd26a' : e.surf === 'gravel' ? '#c8a070' : '#e8eef6'; const a = T(M.X[i], M.Z[i]), b = T(M.X[i + 1], M.Z[i + 1]); g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke(); }
+    const icon = { fest: '#ffffff', event: '#ff8a1f', radar: '#19d3ff', drift: '#ff5ad8', jump: '#ffb02e', board: '#ffd23a' };
+    for (const pt of M.points) {
+      if (pt.type === 'board' && w.save.boards[pt.id]) continue;
+      const a = T(pt.x, pt.z); if (Math.hypot(a[0], a[1]) > s * 0.7) continue;
+      g.fillStyle = w.save.disc[pt.id] ? icon[pt.type] : 'rgba(255,255,255,0.35)'; g.beginPath(); g.arc(a[0], a[1], pt.type === 'board' ? 3 : 5, 0, 6.283); g.fill();
+    }
+    for (const c of w.cars) { if (c === p) continue; const a = T(c.x, c.z); g.fillStyle = c.rival ? '#ff4a5a' : '#9aa6b8'; g.beginPath(); g.arc(a[0], a[1], 3, 0, 6.283); g.fill(); }
+    g.restore();
+    g.fillStyle = '#19d3ff'; g.strokeStyle = '#000'; g.beginPath(); g.moveTo(s / 2, s / 2 - 8); g.lineTo(s / 2 + 6, s / 2 + 6); g.lineTo(s / 2 - 6, s / 2 + 6); g.closePath(); g.fill(); g.stroke();
+  }
+  function updateWorldHud() {
+    const w = G.world, p = w.player, M = w.M;
+    setText('wReg', M.regionAt(p.x, p.z).name);
+    setText('wTod', hh(w.save.tod) + (w.save.autoTime ? '' : ' (стоит)'));
+    setText('wWeather', WD.WEATHER[w.save.weather].name);
+    const c = w.counts(); setText('wBoards', c.boards + ' / ' + c.boardsAll);
+    setText('wMoney', money(G.career.money));
+    $('hNitroBar').style.height = `calc((100% - 6px) * ${p.nitro.toFixed(3)})`;
+    const dr = w.drift, showDrift = w.zone && dr.active && dr.pending > 0;
+    $('hDrift').style.display = w.zone ? 'block' : 'none';
+    if (w.zone) { setText('hDriftPts', (showDrift ? '+' + dr.pending.toLocaleString('ru-RU') : (dr.total || 0).toLocaleString('ru-RU'))); setText('hDriftMul', '×' + dr.mult); $('hDriftGrace').style.width = Math.round((1 - dr.grace / 1.2) * 100) + '%'; }
+    const b = G.settings.bindings;
+    let prompt = '';
+    if (w.nearHub) prompt = `<kbd>E</kbd> ${w.nearHub.type === 'fest' ? 'Фестиваль: машина, погода, время' : 'События: ' + esc(w.nearHub.name)}`;
+    else if (w.nearRival) prompt = `<kbd>E</kbd> ${esc(w.nearRival.name)} вызывает на дуэль`;
+    const pr = $('wPrompt'); if (hudCache.wPrompt !== prompt) { hudCache.wPrompt = prompt; pr.innerHTML = prompt; pr.style.display = prompt ? 'block' : 'none'; }
+    drawSpeedo(p); drawWorldMinimap();
+    if (G.settings.showFps) setText('hFps', G.fps + ' FPS');
+    void b;
+  }
+
+  // ---------- большая карта ----------
+  const MAP_TYPES = [['event', 'События', '#ff8a1f'], ['radar', 'Радары', '#19d3ff'], ['drift', 'Зоны дрифта', '#ff5ad8'], ['jump', 'Рампы', '#ffb02e'], ['board', 'Щиты', '#ffd23a'], ['fest', 'Фестиваль', '#ffffff']];
+  G.mapFilter = { event: true, radar: true, drift: true, jump: true, board: true, fest: true };
+  function openMap() {
+    if (!G.world) return;
+    G.overlay = 'map'; $('scrMap').classList.add('show');
+    $('mapTitle').textContent = G.world.M.name;
+    const f = $('mapFilters'); f.innerHTML = '';
+    for (const [t, name, color] of MAP_TYPES) {
+      const l = document.createElement('label'); l.innerHTML = `<input type="checkbox" data-f="${t}" ${G.mapFilter[t] ? 'checked' : ''}><span class="legend"><i style="background:${color}"></i>${name}</span>`;
+      l.querySelector('input').onchange = (e) => { G.mapFilter[t] = e.target.checked; drawBigMap(); };
+      f.appendChild(l);
+    }
+    buildWeatherSeg($('mapWeather'), $('mapTod'), drawBigMap);
+    drawBigMap();
+  }
+  function buildWeatherSeg(wEl, tEl, after) {
+    const sv = G.world.save;
+    wEl.innerHTML = ''; tEl.innerHTML = '';
+    for (const k in WD.WEATHER) { const b = document.createElement('button'); b.textContent = WD.WEATHER[k].name; b.className = sv.weather === k ? 'on' : ''; b.dataset.w = k; b.onclick = () => { sv.weather = k; saveWorld(); A.play('click'); buildWeatherSeg(wEl, tEl, after); if (after) after(); }; wEl.appendChild(b); }
+    for (const [v, name] of [['auto', 'Идёт'], [7, 'Утро'], [13, 'День'], [18.5, 'Вечер'], [23, 'Ночь']]) {
+      const b = document.createElement('button'); b.textContent = name; b.className = (v === 'auto' ? sv.autoTime : !sv.autoTime && Math.abs(sv.tod - v) < 0.01) ? 'on' : '';
+      b.onclick = () => { if (v === 'auto') sv.autoTime = true; else { sv.autoTime = false; sv.tod = v; } saveWorld(); A.play('click'); buildWeatherSeg(wEl, tEl, after); if (after) after(); };
+      tEl.appendChild(b);
+    }
+  }
+  function bigMapLayout() {
+    const cv = $('bigMap'), r = cv.getBoundingClientRect(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    if (cv.width !== Math.round(r.width * dpr)) { cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr); }
+    const img = mapImage(G.world.M.id), side = Math.min(cv.width, cv.height), ox = (cv.width - side) / 2, oy = (cv.height - side) / 2;
+    return { cv, img, side, ox, oy, dpr, P: (x, z) => { const c = img.toC(x, z); return [ox + c[0] / img.size * side, oy + c[1] / img.size * side]; } };
+  }
+  function drawBigMap() {
+    const L = bigMapLayout(), g = L.cv.getContext('2d'), w = G.world, sv = w.save;
+    g.fillStyle = '#0c0b12'; g.fillRect(0, 0, L.cv.width, L.cv.height);
+    g.drawImage(L.img.canvas, L.ox, L.oy, L.side, L.side);
+    const color = {}; MAP_TYPES.forEach((t) => { color[t[0]] = t[2]; });
+    for (const pt of w.M.points) {
+      if (!G.mapFilter[pt.type]) continue;
+      const open = sv.disc[pt.id], [x, y] = L.P(pt.x, pt.z);
+      if (pt.type === 'board') { if (!open) continue; g.fillStyle = sv.boards[pt.id] ? 'rgba(120,255,160,0.9)' : color.board; g.beginPath(); g.arc(x, y, 4 * L.dpr, 0, 6.283); g.fill(); continue; }
+      g.fillStyle = open ? color[pt.type] : 'rgba(255,255,255,0.25)'; g.strokeStyle = '#000'; g.lineWidth = 1.5 * L.dpr;
+      g.beginPath(); g.arc(x, y, 7 * L.dpr, 0, 6.283); g.fill(); g.stroke();
+      if (!open) { g.fillStyle = '#000'; g.font = `bold ${10 * L.dpr}px sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('?', x, y); }
+    }
+    const p = w.player, [px, py] = L.P(p.x, p.z);
+    g.save(); g.translate(px, py); g.rotate(Math.atan2(-Math.cos(p.h), -Math.sin(p.h)) - Math.PI / 2); g.fillStyle = '#19d3ff'; g.strokeStyle = '#000'; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(0, 12 * L.dpr); g.lineTo(8 * L.dpr, -8 * L.dpr); g.lineTo(-8 * L.dpr, -8 * L.dpr); g.closePath(); g.fill(); g.stroke(); g.restore();
+    const c = w.counts(), rec = sv.rec;
+    $('mapStats').innerHTML = `Щиты: ${c.boards} / ${c.boardsAll}<br>Открыто точек: ${c.disc} / ${c.all}<br>Рекорды радаров: ${Object.keys(rec.radar).length}, зон дрифта: ${Object.keys(rec.drift).length}, прыжков: ${Object.keys(rec.jump).length}`;
+  }
+  $('bigMap').addEventListener('click', (ev) => {
+    if (!G.world) return;
+    const L = bigMapLayout(), r = L.cv.getBoundingClientRect(), mx = (ev.clientX - r.left) * L.dpr, my = (ev.clientY - r.top) * L.dpr;
+    let best = null, bd = 16 * L.dpr;
+    for (const pt of G.world.M.points) { if (!G.mapFilter[pt.type] || pt.type === 'board') continue; const [x, y] = L.P(pt.x, pt.z), d = Math.hypot(x - mx, y - my); if (d < bd) { bd = d; best = pt; } }
+    if (!best) return;
+    if (!worldTravel(best.id)) toast('Точка «' + best.name + '» ещё не открыта: подъедьте к ней');
+  });
+  function worldTravel(id) {
+    const ok = G.world.fastTravel(id);
+    if (!ok) return false;
+    WR.stream(true); WR.cam.init = false; closeOverlay(); saveWorld();
+    const pt = G.world.M.pointById(id); showMsg('Быстрое перемещение', pt.name, 1400);
+    return true;
+  }
+  function closeOverlay() { G.overlay = null; ['scrMap', 'scrHub'].forEach((id) => $(id).classList.remove('show')); G.acc = 0; }
+  $('mapClose').onclick = closeOverlay;
+  $('hubClose').onclick = closeOverlay;
+
+  // ---------- событийные точки, фестиваль, дуэли ----------
+  function openHub(pt) {
+    G.overlay = 'hub'; $('scrHub').classList.add('show');
+    const list = $('hubList'); list.innerHTML = '';
+    if (pt.type === 'fest') {
+      $('hubTitle').textContent = 'Фестиваль'; $('hubAbout').textContent = 'Смените машину, погоду и время суток. Здесь же появляетесь после «С фестиваля».';
+      const row = (label, el) => { const d = document.createElement('div'); d.className = 'row'; d.innerHTML = `<span>${label}</span>`; d.appendChild(el); list.appendChild(d); };
+      const cars = document.createElement('div'); cars.className = 'seg';
+      for (const id of G.career.d.owned) { const b = document.createElement('button'); b.textContent = C.carDef(id).name; b.className = id === G.world.player.carId ? 'on' : ''; b.onclick = () => { switchWorldCar(id); openHub(pt); }; cars.appendChild(b); }
+      row('Машина', cars);
+      const ws = document.createElement('div'), ts = document.createElement('div'); ws.className = ts.className = 'seg';
+      buildWeatherSeg(ws, ts); row('Погода', ws); row('Время', ts);
+      return;
+    }
+    const td = trackDef(pt.track);
+    $('hubTitle').textContent = 'События: ' + td.name; $('hubAbout').textContent = td.place + ' · ' + D.SURF[td.surface].name + '. Результат идёт в карьеру, после заезда вернётесь сюда.';
+    D.CUPS.forEach((cup, ci) => cup.events.forEach((evt) => {
+      if (evt.track !== pt.track) return;
+      const open = G.career.cupUnlocked(ci), d = document.createElement('div'); d.className = 'row';
+      d.innerHTML = `<div>${medalHtml(G.career.eventMedal(evt.id))} <b>${esc(evt.name)}</b><div class="sub">${esc(cup.name)} · ${D.EVENT_TYPES[evt.type].name}${open ? '' : ' · кубок закрыт'}</div></div>`;
+      const b = document.createElement('button'); b.className = 'buy'; b.textContent = 'Старт'; b.disabled = !open; b.dataset.evt = evt.id;
+      b.onclick = () => startFromWorld(() => startCareerEvent(evt.id));
+      d.appendChild(b); list.appendChild(d);
+    }));
+  }
+  function switchWorldCar(id) {
+    if (!G.career.owns(id)) return;
+    const w = G.world, p = w.player, st = C.carStats(id, G.career.d.upg[id]);
+    p.st = st; p.carId = id; p.look = G.career.look(id); w.save.car = id;
+    WR.dispose(); WR.init(w, G.settings); saveWorld();
+  }
+  async function startFromWorld(fn) {
+    closeOverlay(); saveWorld();
+    WR.dispose();                                   // мир пока не рисуется: память - заезду
+    G.fromWorld = true;
+    const r = await fn();
+    if (!r) { G.fromWorld = false; resumeWorld(); }
+    return r;
+  }
+  function startWorldDuel(a) {
+    const w = G.world, reg = w.M.R.filter((r) => r.track).sort((x, y) => Math.hypot(x.x - w.player.x, x.z - w.player.z) - Math.hypot(y.x - w.player.x, y.z - w.player.z))[0];
+    const track = reg ? reg.track : 'city', carId = w.player.carId;
+    a.cool = 90;
+    const entries = [{ name: a.name, car: a.car.carId, upg: { engine: 2, tyres: 2, susp: 2 }, look: aiLook(a.name), rival: true, ai: { pace: 0.9 + (D.DIFFICULTY[G.settings.difficulty] || D.DIFFICULTY.normal).pace, mistakes: 0.015 } },
+      { name: 'Вы', car: carId, upg: G.career.d.upg[carId], look: G.career.look(carId), isPlayer: true }];
+    return startFromWorld(() => startRace({ track, mode: 'duel', laps: trackDef(track).closed ? 1 : 1, entries, seed: nextSeed(), assist: playerAssist() }, { kind: 'worldDuel', title: 'Дуэль: ' + a.name, reward: 1500 }));
+  }
+
+  // ---------- фото-режим ----------
+  function photoToggle(on) {
+    WR.photoMode(on); G.overlay = on ? 'photo' : null;
+    $('hud').style.visibility = on ? 'hidden' : ''; $('wPhoto').style.display = on ? 'block' : 'none';
+  }
+  function photoSave() {
+    WR.frame(0, 1, G.camMode);
+    const url = $('gl').toDataURL('image/png'), a = document.createElement('a');
+    a.href = url; a.download = 'horizon-drift-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.png'; a.click();
+    toast('Снимок сохранён');
+  }
+  (function photoMouse() {
+    let down = false, lx = 0, ly = 0; const gl = $('gl');
+    gl.addEventListener('pointerdown', (e) => { if (G.overlay === 'photo') { down = true; lx = e.clientX; ly = e.clientY; } });
+    window.addEventListener('pointerup', () => { down = false; });
+    window.addEventListener('pointermove', (e) => { if (down && G.overlay === 'photo') { WR.photoMove(-(e.clientX - lx) * 0.008, (e.clientY - ly) * 0.006, 1); lx = e.clientX; ly = e.clientY; } });
+    window.addEventListener('wheel', (e) => { if (G.overlay === 'photo') WR.photoMove(0, 0, e.deltaY > 0 ? 1.1 : 0.9); }, { passive: true });
+  })();
+
+  function worldKey(e, act) {
+    const w = G.world;
+    if (G.overlay === 'photo') { if (e.code === 'Enter') photoSave(); if (e.code === 'KeyF' || e.code === 'Escape') photoToggle(false); e.preventDefault(); return true; }
+    if (G.overlay === 'map') { if (e.code === 'KeyM' || e.code === 'Escape') closeOverlay(); e.preventDefault(); return true; }
+    if (G.overlay === 'hub') { if (e.code === 'Escape') closeOverlay(); return true; }
+    if (G.paused) return false;
+    if (e.code === 'KeyM') { openMap(); e.preventDefault(); return true; }
+    if (e.code === 'KeyF') { photoToggle(true); e.preventDefault(); return true; }
+    if (e.code === 'KeyE' && !e.repeat) {
+      if (w.nearHub) { openHub(w.nearHub); return true; }
+      if (w.nearRival) { startWorldDuel(w.nearRival); return true; }
+    }
+    if (act === 'reset' && !e.repeat) { w.resetPlayer(); WR.cam.init = false; return true; }
+    return false;
+  }
 
   // ======================= запуск =======================
   function boot() {
@@ -858,6 +1269,10 @@
     step(n, input) { if (input) G.override = Object.assign({ thr: 0, brk: 0, steer: 0, hb: 0, nitro: 0, analog: false }, input); readInput(); if (G.race && !G.paused) stepRace(n || 1); G.override = null; return G.race; },
     setInput(o) { G.override = o ? Object.assign({ thr: 0, brk: 0, steer: 0, hb: 0, nitro: 0, analog: false }, o) : null; },
     showResults, frames: () => G.frameTimes.slice(), fps: () => G.fps,
+    startWorld: (map, o) => startWorld(map, (o && o.car) || G.career.d.current, !!(o && o.fest)),
+    get world() { return G.world; }, worldRender: WR, worldData: WD, mapImage, saveWorld, quitWorld: () => quitWorld(),
+    stepWorld(n, input) { if (G.world && !G.paused) stepWorld(n || 1, input ? Object.assign({ thr: 0, brk: 0, steer: 0, hb: 0, nitro: 0, analog: false }, input) : undefined); return G.world; },
+    openMap, worldTravel: (id) => worldTravel(id), openHub: (pt) => openHub(pt), get overlay() { return G.overlay; }, photo: (on) => photoToggle(on),
     reloadCareer() { G.career = new C.Career(load(KEY.career), (d) => save(KEY.career, d)); },
   };
   window.__drift = api;
