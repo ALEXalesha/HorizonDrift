@@ -152,10 +152,10 @@
     return g;
   }
 
-  const liveryCache = {};
-  function liveryTex(carId, look) {
+  let liveryCache = {};
+  function liveryTex(carId, look, own) {
     const key = [carId, look.color, look.color2, look.livery].join('|');
-    if (liveryCache[key]) return liveryCache[key];
+    if (!own && liveryCache[key]) return liveryCache[key];
     const t = canvasTex(512, 512, (g, w, h) => {
       g.fillStyle = look.color; g.fillRect(0, 0, w, h);
       const c2 = look.color2, rng = rngOf(C.hashStr(key));
@@ -201,14 +201,14 @@
         default: break;
       }
     }, false, true);
-    liveryCache[key] = t;
+    if (!own) liveryCache[key] = t;
     return t;
   }
 
-  const rimCache = {};
-  function rimTex(style, color) {
+  let rimCache = {};
+  function rimTex(style, color, own) {
     const key = style + color;
-    if (rimCache[key]) return rimCache[key];
+    if (!own && rimCache[key]) return rimCache[key];
     const t = canvasTex(128, 128, (g, w) => {
       const c = w / 2;
       g.fillStyle = '#1a1b1e'; g.fillRect(0, 0, w, w);
@@ -221,8 +221,13 @@
       g.fillStyle = '#2a2b2f'; g.beginPath(); g.arc(c, c, 12, 0, Math.PI * 2); g.fill();
       g.fillStyle = color; g.beginPath(); g.arc(c, c, 6, 0, Math.PI * 2); g.fill();
     }, false, true);
-    rimCache[key] = t;
+    if (!own) rimCache[key] = t;
     return t;
+  }
+  function clearCarTexCaches() {
+    for (const k in liveryCache) liveryCache[k].dispose();
+    for (const k in rimCache) rimCache[k].dispose();
+    liveryCache = {}; rimCache = {};
   }
 
   let blobTex = null;
@@ -233,10 +238,12 @@
 
   // Машина: кузов, стёкла, крыша, колёса с дисками, фары, стопы, спойлер, тень-пятно.
   function buildCar(carId, look, opts) {
+    opts = opts || {};
     const def = C.carDef(carId), S = SHAPES[def.shape] || SHAPES.coupe;
+    const liv = liveryTex(carId, look, opts.own), rim = rimTex(look.rims, look.rimColor, opts.own);
     const L = S.L, W = S.W, grp = new THREE.Group();
     const H = Math.max.apply(null, S.lower.map((p) => p[1]));
-    const paint = new THREE.MeshStandardMaterial({ map: liveryTex(carId, look), metalness: 0.45, roughness: 0.32, envMap: R.envMap, envMapIntensity: 0.9 });
+    const paint = new THREE.MeshStandardMaterial({ map: liv, metalness: 0.45, roughness: 0.32, envMap: R.envMap, envMapIntensity: 0.9 });
     const glass = new THREE.MeshStandardMaterial({ color: 0x0c1016, metalness: 0.6, roughness: 0.12, envMap: R.envMap, envMapIntensity: 1.2 });
     const dark = new THREE.MeshStandardMaterial({ color: 0x16171a, metalness: 0.2, roughness: 0.7 });
     const body = new THREE.Mesh(bodyGeom(S.lower, L, W, H), paint);
@@ -268,7 +275,7 @@
     if (S.lightbar) { const lb = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.1, 0.1), headMat); lb.position.set(0, S.cabin[2][1] + 0.08, S.cabin[2][0] - L / 2 - 0.1); grp.add(lb); }
     // колёса
     const tyreMat = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.9 });
-    const rimMat = new THREE.MeshStandardMaterial({ map: rimTex(look.rims, look.rimColor), metalness: 0.7, roughness: 0.3, envMap: R.envMap });
+    const rimMat = new THREE.MeshStandardMaterial({ map: rim, metalness: 0.7, roughness: 0.3, envMap: R.envMap });
     const tyreG = new THREE.CylinderGeometry(S.wr, S.wr, 0.27, 20); tyreG.rotateZ(Math.PI / 2);
     const rimG = new THREE.CylinderGeometry(S.wr * 0.7, S.wr * 0.7, 0.285, 20); rimG.rotateZ(Math.PI / 2);
     const wheels = [];
@@ -284,13 +291,14 @@
     const blob = new THREE.Mesh(new THREE.PlaneGeometry(W + 0.8, L + 0.9), new THREE.MeshBasicMaterial({ map: getBlob(), transparent: true, depthWrite: false }));
     blob.rotation.x = -Math.PI / 2; blob.position.y = 0.04; blob.renderOrder = 1;
     const root = new THREE.Group(); root.add(grp); root.add(blob);
-    return { root, body: grp, paint, rimMat, headMat, tailMat, wheels, blob, S, L, W, carId, look: Object.assign({}, look), mats: [paint, glass, dark, headMat, tailMat, tyreMat, rimMat], geos: [] };
+    return { root, body: grp, paint, rimMat, headMat, tailMat, wheels, blob, S, L, W, carId, look: Object.assign({}, look), mats: [paint, glass, dark, headMat, tailMat, tyreMat, rimMat], ownTex: opts.own ? [liv, rim] : [] };
   }
   R.buildCar = buildCar;
   function disposeCar(cm) {
     if (!cm) return;
     cm.root.traverse((o) => { if (o.geometry && o.geometry !== undefined) o.geometry.dispose(); });
     for (const m of cm.mats) m.dispose();
+    for (const t of cm.ownTex || []) t.dispose();
     cm.root.children[1].material.dispose();
   }
 
@@ -332,7 +340,7 @@
     const sr = R.showroom;
     if (sr.car && sr.car.carId === carId && JSON.stringify(sr.car.look) === JSON.stringify(look)) return;
     if (sr.car) { sr.turn.remove(sr.car.root); disposeCar(sr.car); }
-    sr.car = buildCar(carId, look);
+    sr.car = buildCar(carId, look, { own: true });
     sr.turn.add(sr.car.root);
   };
   R.showroomView = function (v) { R.showroom.view = v; };
@@ -375,9 +383,11 @@
       g.fillStyle = 'rgba(60,45,30,0.25)'; g.fillRect(w * 0.2, 0, w * 0.12, h); g.fillRect(w * 0.68, 0, w * 0.12, h);
     }, true);
     if (kind === 'snow') return canvasTex(256, 512, (g, w, h) => {
-      g.fillStyle = '#e4ebf3'; g.fillRect(0, 0, w, h);
-      speckle(g, w, h, rng, 4000, ['#d3dce8', '#f4f8fc', '#c8d2df'], 1, 3);
-      g.fillStyle = 'rgba(120,140,165,0.28)'; g.fillRect(w * 0.2, 0, w * 0.12, h); g.fillRect(w * 0.68, 0, w * 0.12, h);
+      // укатанный снег: серее сугробов, с колеями и синими пунктирами по краям
+      g.fillStyle = '#aeb8c6'; g.fillRect(0, 0, w, h);
+      speckle(g, w, h, rng, 5000, ['#9eaaba', '#c3ccd8', '#a3aebd', '#b8c1cd'], 1, 3);
+      g.fillStyle = 'rgba(70,82,100,0.35)'; g.fillRect(w * 0.2, 0, w * 0.12, h); g.fillRect(w * 0.68, 0, w * 0.12, h);
+      g.fillStyle = '#3f7fd0'; for (let y = 0; y < h; y += 64) { g.fillRect(w * 0.03, y, 5, 32); g.fillRect(w * 0.97 - 5, y, 5, 32); }
     }, true);
     const pal = { concrete: ['#8d8f94', ['#7d7f84', '#9fa1a6', '#86888d']], sand: ['#d8c090', ['#c9ae7c', '#e6d2a6', '#bfa575']], grass: ['#4f7a34', ['#446c2c', '#5f8c3e', '#3b5f26', '#6c9646']],
       snowbank: ['#f0f4f8', ['#dfe7f0', '#ffffff', '#d0dae6']], redsand: ['#c4764a', ['#b3673d', '#d4885a', '#a65a33']], snowground: ['#eef3f8', ['#dde6f0', '#ffffff']] };
@@ -855,6 +865,18 @@
         i = j;
       }
     }
+    // вешки вдоль заснеженных участков: оранжевые с чёрным верхом, по обе стороны через 18 м
+    let poles = 0;
+    if (runs.some((r) => r[2] === 'snow')) {
+      const pg = mergeGeoms([{ geo: new THREE.CylinderGeometry(0.06, 0.06, 1.6, 5), color: '#ff7a1a', matrix: M4(0, 0.8, 0) }, { geo: new THREE.CylinderGeometry(0.065, 0.065, 0.3, 5), color: '#15161a', matrix: M4(0, 1.7, 0) }]);
+      const im = new THREE.InstancedMesh(pg, track(new THREE.MeshLambertMaterial({ vertexColors: true })), Math.ceil(tr.N * tr.step / 18) * 2 + 2);
+      const m = new THREE.Matrix4();
+      for (let i = 0; i < tr.N; i += Math.round(18 / tr.step)) {
+        if (tr.surf[i] !== 'snow') continue;
+        for (const sd of [-1, 1]) { const d = sd * (tr.hw + 0.8); m.makeTranslation(tr.x[i] + tr.nx[i] * d, tr.y[i], tr.z[i] + tr.nz[i] * d); im.setMatrixAt(poles++, m); }
+      }
+      im.count = poles; im.instanceMatrix.needsUpdate = true; scene.add(im);
+    }
     const wMat = track(new THREE.MeshLambertMaterial({ map: wallTex(theme.wall), side: THREE.DoubleSide }));
     for (const side of [-1, 1]) { const w = new THREE.Mesh(wallRibbon(tr, side * (tr.W + 0.05), 1.1, 4), wMat); w.castShadow = shadows; w.receiveShadow = true; scene.add(w); }
     if (!tr.closed) for (const e of [0, tr.N - 1]) {
@@ -914,7 +936,7 @@
     const skids = skidSystem(s.particles === 'low' ? 800 : 2400); scene.add(skids.mesh);
     let snow = null;
     if (theme.snowfall) { snow = particleSystem(400); scene.add(snow.pts); }
-    R.race = { race, scene, sun, hemi, cars, arch, parts, skids, snow, water, headlight, theme, ctx, cam: { x: 0, y: 0, z: 0, init: false, fov: 62, shake: 0 }, time: 0 };
+    R.race = { race, scene, sun, hemi, cars, arch, parts, skids, snow, water, headlight, theme, ctx, poles, cam: { x: 0, y: 0, z: 0, init: false, fov: 62, shake: 0 }, time: 0 };
     R.applySettings(s);
     await prog(1, 'Готово');
     return R.race;
@@ -923,8 +945,12 @@
   R.disposeRace = function () {
     if (!R.race) return;
     for (const cm of R.race.cars) disposeCar(cm);
+    // карта теней солнца и фары - свои текстуры, без dispose они копились с каждым заездом
+    if (R.race.sun) R.race.sun.dispose();
+    if (R.race.headlight) R.race.headlight.dispose();
     R.race.scene.traverse((o) => { if (o.isInstancedMesh) o.dispose(); });
     while (disposables.length) { const o = disposables.pop(); if (o && o.dispose) o.dispose(); }
+    clearCarTexCaches();
     R.race = null;
   };
 
@@ -992,11 +1018,11 @@
       X.arch.visible = !pl.finished; X.arch.material.opacity = 0.35 + 0.2 * Math.sin(X.time * 5);
     }
     if (X.water && !X.theme.water.ice) X.water.material.map.offset.set(X.time * 0.004, X.time * 0.002);
-    // соперник вплотную перед камерой становится полупрозрачным, чтобы не закрывать свою машину
+    // соперник между камерой и своей машиной становится полупрозрачным, чтобы не закрывать её
     race.cars.forEach((c, k) => {
       if (c === pl || c.out) return;
-      const cm = X.cars[k], d = Math.hypot(c.x - R.camera.position.x, c.z - R.camera.position.z);
-      const fade = camMode !== 'hood' && d < 6.5;
+      const cm = X.cars[k];
+      const fade = camMode !== 'hood' && fadeBetween(R.camera.position.x, R.camera.position.z, pl.x, pl.z, c.x, c.z);
       if (cm.faded !== fade) {
         cm.faded = fade;
         cm.root.traverse((o) => { if (o.isMesh && o !== cm.blob) { const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach((m) => { m.transparent = fade; m.opacity = fade ? 0.35 : 1; m.depthWrite = !fade; }); } });
@@ -1037,6 +1063,23 @@
     if (X.headlight) { X.headlight.position.set(px + fx * 1.5, py + 1.2, pz + fz * 1.5); X.headlight.target.position.set(px + fx * 25, py, pz + fz * 25); X.headlight.target.updateMatrixWorld(); }
     if (X.ctx.stars) X.ctx.stars.position.set(cam.position.x, 0, cam.position.z);
     R.renderer.render(X.scene, cam);
+  };
+
+  // Точка (qx, qz) закрывает игрока (px, pz) от камеры (cx, cz): рядом с отрезком камера-игрок или вплотную к камере.
+  function fadeBetween(cx, cz, px, pz, qx, qz) {
+    const dx = px - cx, dz = pz - cz, l2 = dx * dx + dz * dz || 1;
+    const t = ((qx - cx) * dx + (qz - cz) * dz) / l2;
+    if (Math.hypot(qx - cx, qz - cz) < 3.5) return true;
+    if (t <= 0 || t >= 1.05) return false;
+    return Math.abs((qx - cx) * dz - (qz - cz) * dx) / Math.sqrt(l2) < 2.4;
+  }
+  R.fadeBetween = fadeBetween;
+  // Средняя яркость текстуры покрытия (для проверок: снег на дороге темнее сугробов).
+  R.surfaceLuma = function (kind) {
+    const t = surfaceTex(kind), c = t.image, g = c.getContext('2d'), d = g.getImageData(0, 0, c.width, c.height).data;
+    let s = 0; for (let i = 0; i < d.length; i += 4) s += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+    disposables.splice(disposables.indexOf(t), 1); t.dispose();
+    return s / (d.length / 4) / 255;
   };
 
   // Мини-карта трассы: путь в координатах холста (для HUD и превью).

@@ -611,6 +611,8 @@
       this.catchup = cfg.catchup !== false && (this.mode === 'race' || this.mode === 'elim');
       this.events = []; this.finishOrder = []; this.elimOrder = []; this.elimRound = 0; this.result = null;
       this.drift = new DriftScorer();
+      // у дрифт-заезда лимит времени: в среднем 9 м/с на круг, дольше - заезд заканчивается с набранными очками
+      this.timeLimit = cfg.timeLimit || (this.mode === 'drift' ? Math.round(this.laps * tr.lapLen / 9) : 0);
       this.cars = cfg.entries.map((e) => {
         const c = makeCar(carStats(e.car, e.upg), e);
         if (e.ai) {
@@ -712,7 +714,7 @@
         const along = c.vx * pr.tx + c.vz * pr.tz, face = Math.sin(c.h) * pr.tx + Math.cos(c.h) * pr.tz;
         if (along < -3 || (face < -0.5 && c.speed > 2)) c.wrongT += dt; else c.wrongT = Math.max(0, c.wrongT - dt * 2);
         c.wrong = c.wrongT > 1;
-        if (c.ai && (!c.isPlayer || c.autopilot)) {
+        if (c.ai && !c.finished && (!c.isPlayer || c.autopilot)) {
           if (c.speed < 1.5 || c.wrong) c.stuckT += dt; else c.stuckT = 0;
           if (c.stuckT > 3) this.resetCar(c);
         }
@@ -721,7 +723,8 @@
       }
       const p = this.player;
       if (p && !p.finished && !p.out && this.phase === 'race') {
-        const onRoad = Math.abs(p.pr.d) < tr.hw + 0.6;
+        // против хода и задом по трассе дрифт не засчитывается
+        const onRoad = Math.abs(p.pr.d) < tr.hw + 0.6 && !p.wrong && (p.vx * p.pr.tx + p.vz * p.pr.tz) > 2;
         const banked = this.drift.update(dt, Math.abs(p.beta) * 180 / Math.PI, p.speed, onRoad);
         if (banked) this.events.push({ type: 'driftBank', pts: banked });
         if (this.drift.drifting) p.nitro = Math.min(1, p.nitro + dt * 0.05);
@@ -730,6 +733,7 @@
       for (const c of this.cars) if (c.hit > 1.5) this.events.push({ type: 'hit', car: c, v: c.hit });
       this.updatePlaces();
       if (this.mode === 'elim') this.checkElim();
+      if (this.phase === 'race' && this.timeLimit && this.t >= this.timeLimit) { this.events.push({ type: 'timeUp' }); this.finish(); }
       if (this.phase === 'race' && p && (p.finished || p.out)) this.finish();
       if (this.phase === 'race' && !p && this.cars.every((c) => c.finished || c.out)) this.finish();
     }
@@ -955,16 +959,46 @@
     return { v: 1, money: 2000, owned: ['iskra'], current: 'iskra', upg: {}, looks: {}, res: {}, victory: false,
       stats: { races: 0, wins: 0, earned: 0, spent: 0, driftBest: 0 } };
   }
+  // Карьера из хранилища: деньги - число не меньше 0, машины - только из списка, медали - только известные.
+  const HEX = /^#[0-9a-f]{6}$/i;
+  function sanitizeCareer(data) {
+    const base = newCareer(), d = data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+    const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
+    const ids = D.CARS.map((c) => c.id);
+    const money = Number(d.money);
+    base.money = typeof d.money !== 'boolean' && Number.isFinite(money) && money >= 0 ? Math.round(money) : base.money;
+    const owned = (Array.isArray(d.owned) ? d.owned : []).filter((x, i, a) => ids.includes(x) && a.indexOf(x) === i);
+    if (!owned.includes('iskra')) owned.unshift('iskra');
+    base.owned = owned;
+    base.current = owned.includes(d.current) ? d.current : owned[0];
+    for (const [k, v] of Object.entries(obj(d.upg))) if (ids.includes(k)) { const u = {}; for (const up of D.UPGRADES) { const n = Number(obj(v)[up.id]); if (Number.isFinite(n)) u[up.id] = clamp(Math.floor(n), 0, D.UPG_MAX); } base.upg[k] = u; }
+    for (const [k, v] of Object.entries(obj(d.looks))) if (ids.includes(k)) base.looks[k] = obj(v);
+    for (const [k, v] of Object.entries(obj(d.res))) {
+      if (!findEvent(k)) continue;
+      const r = {}, o = obj(v);
+      if (MEDAL_RANK[o.medal]) r.medal = o.medal;
+      if (Number.isFinite(Number(o.best)) && o.best !== null && o.best !== '') r.best = Number(o.best);
+      base.res[k] = r;
+    }
+    const st = obj(d.stats);
+    for (const k in base.stats) { const n = Number(st[k]); if (Number.isFinite(n) && n >= 0) base.stats[k] = n; }
+    base.victory = d.victory === true;
+    return base;
+  }
+  function cleanLook(carId, l) {
+    const out = defaultLook(carId), o = l && typeof l === 'object' ? l : {};
+    if (HEX.test(o.color)) out.color = o.color;
+    if (HEX.test(o.color2)) out.color2 = o.color2;
+    if (HEX.test(o.rimColor)) out.rimColor = o.rimColor;
+    if (D.RIMS.some((r) => r.id === o.rims)) out.rims = o.rims;
+    if (D.LIVERIES.some((r) => r.id === o.livery)) out.livery = o.livery;
+    return out;
+  }
   function defaultLook(carId) { const d = carDef(carId); return { color: d.color, color2: '#f4f4f4', rims: 'spoke5', rimColor: '#c9ced6', livery: 'none' }; }
 
   class Career {
     constructor(data, save) {
-      this.d = Object.assign(newCareer(), data || {});
-      this.d.stats = Object.assign(newCareer().stats, this.d.stats || {});
-      this.d.res = this.d.res || {}; this.d.upg = this.d.upg || {}; this.d.looks = this.d.looks || {};
-      if (!Array.isArray(this.d.owned) || !this.d.owned.length) this.d.owned = ['iskra'];
-      if (!this.d.owned.includes(this.d.current)) this.d.current = this.d.owned[0];
-      if (!(this.d.money >= 0)) this.d.money = 0;
+      this.d = sanitizeCareer(data);
       this.save = save || (() => {});
     }
     get money() { return this.d.money; }
@@ -1029,7 +1063,7 @@
       this.save(this.d);
       return { ok: true, price };
     }
-    look(carId) { return Object.assign(defaultLook(carId), this.d.looks[carId] || {}); }
+    look(carId) { return cleanLook(carId, this.d.looks[carId]); }
     setLook(carId, patch) { this.d.looks[carId] = Object.assign(this.look(carId), patch); this.save(this.d); }
     stats(carId) { return carStats(carId, this.d.upg[carId]); }
   }
@@ -1063,11 +1097,28 @@
   }
 
   // ======================= НАСТРОЙКИ =======================
+  // Настройки из хранилища: только известные ключи, числа - в пределах, строки - из списка допустимых.
+  const SET_RANGE = { musicVol: [0, 1], sfxVol: [0, 1], engineVol: [0, 1], steerSens: [0.5, 1.6], deadzone: [0, 0.4] };
+  const SET_ENUM = { difficulty: () => Object.keys(D.DIFFICULTY), units: () => ['kmh', 'mph'], gearbox: () => ['auto', 'manual'], quality: () => Object.keys(D.QUALITY),
+    drawDist: () => Object.keys(D.DRAW_DIST), particles: () => ['low', 'medium', 'high'], camera: () => ['chase', 'far', 'hood'] };
+  const CODE_RE = /^[A-Za-z0-9]{1,24}$/;
   function mergeSettings(saved) {
     const s = JSON.parse(JSON.stringify(D.DEFAULT_SETTINGS));
-    if (saved && typeof saved === 'object') {
-      for (const k in s) if (k !== 'bindings' && saved[k] !== undefined && typeof saved[k] === typeof s[k]) s[k] = saved[k];
-      if (saved.bindings) for (const a in s.bindings) if (Array.isArray(saved.bindings[a])) s.bindings[a] = [String(saved.bindings[a][0] || ''), String(saved.bindings[a][1] || '')];
+    if (!saved || typeof saved !== 'object') return s;
+    for (const k in s) {
+      if (k === 'bindings' || saved[k] === undefined) continue;
+      const v = saved[k];
+      if (SET_RANGE[k]) { const n = Number(v); if (typeof v !== 'boolean' && v !== '' && Number.isFinite(n)) s[k] = clamp(n, SET_RANGE[k][0], SET_RANGE[k][1]); }
+      else if (SET_ENUM[k]) { if (SET_ENUM[k]().includes(v)) s[k] = v; }
+      else if (typeof v === typeof s[k]) s[k] = v;
+    }
+    if (saved.bindings && typeof saved.bindings === 'object') {
+      for (const a in s.bindings) {
+        const b = saved.bindings[a];
+        if (!Array.isArray(b)) continue;
+        const pair = [0, 1].map((k) => (typeof b[k] === 'string' && (b[k] === '' || CODE_RE.test(b[k])) ? b[k] : null));
+        if (pair[0] !== null && pair[1] !== null && (pair[0] || pair[1])) s.bindings[a] = pair;
+      }
     }
     return s;
   }
@@ -1087,6 +1138,17 @@
     b[action][slot] = code;
     return { bindings: b, conflict };
   }
+  // Рекорды из хранилища: по каждой трассе только положительные числа lap, time, drift.
+  function sanitizeRecords(r) {
+    const out = { tracks: {} }, tr = r && typeof r === 'object' && r.tracks && typeof r.tracks === 'object' ? r.tracks : {};
+    for (const t of D.TRACKS) {
+      const v = tr[t.id]; if (!v || typeof v !== 'object') continue;
+      const o = {};
+      for (const k of ['lap', 'time', 'drift']) { const n = Number(v[k]); if (typeof v[k] !== 'boolean' && v[k] !== null && v[k] !== '' && Number.isFinite(n) && n > 0) o[k] = n; }
+      if (Object.keys(o).length) out.tracks[t.id] = o;
+    }
+    return out;
+  }
   function toUnits(ms, units) { return units === 'mph' ? ms * 2.23694 : ms * 3.6; }
   function fmtTime(t) {
     if (t == null || !isFinite(t)) return '--:--.--';
@@ -1096,5 +1158,5 @@
 
   return { G, DT, STEP, GEARS, clamp, lerp, mulberry32, hashStr, buildTrack, project, pointAt, idxAt, trackClearance, solveAutos, runTurtle,
     carDef, carStats, upgradeLevels, makeCar, stepCar, accelTime, surfMu, DriftScorer, speedProfile, Race, botTime, timeThresholds, TIME_MEDALS,
-    medalFor, rewardFor, findEvent, newCareer, defaultLook, Career, eventEntries, mergeSettings, rebind, toUnits, fmtTime, MEDAL_RANK };
+    medalFor, rewardFor, findEvent, newCareer, defaultLook, Career, sanitizeCareer, sanitizeRecords, cleanLook, eventEntries, mergeSettings, rebind, toUnits, fmtTime, MEDAL_RANK };
 });

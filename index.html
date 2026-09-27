@@ -56,6 +56,10 @@
   .card h3 { font-size: 20px; letter-spacing: 1px; margin-bottom: 4px; }
   .card .sub { color: var(--dim); font-size: 13px; line-height: 1.35; }
   .medals { display: flex; gap: 6px; margin-top: 10px; align-items: center; }
+  .evlist { list-style: none; margin-top: 10px; display: grid; gap: 6px; }
+  .evlist li { display: grid; grid-template-columns: 24px 1fr; column-gap: 8px; align-items: center; font-size: 14px; }
+  .evlist li small { grid-column: 2; color: var(--dim); font-size: 12px; }
+  .card.locked .evlist { opacity: 0.8; }
   .medal { width: 22px; height: 22px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 11px; font-weight: 800; color: #1a1406; border: 2px solid rgba(0, 0, 0, 0.3); }
   .medal.gold { background: radial-gradient(circle at 35% 30%, #fff3b0, var(--gold)); }
   .medal.silver { background: radial-gradient(circle at 35% 30%, #ffffff, var(--silver)); }
@@ -74,7 +78,7 @@
   .cols { display: flex; gap: 18px; min-height: 0; flex: 1; }
   .col { display: flex; flex-direction: column; min-height: 0; }
   .lbl { color: var(--dim); letter-spacing: 3px; font-size: 12px; text-transform: uppercase; margin: 8px 0 6px; }
-  #qTracks { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); flex: 1; }
+  #qTracks { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); flex: 1; align-content: start; }
   #qTracks .card { padding: 10px 12px; }
   #qTracks .card h3 { font-size: 16px; }
   .seg { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -87,7 +91,9 @@
 
   /* гараж */
   #scrGarage .cols { gap: 14px; }
-  #gCars { width: 250px; flex: 0 0 auto; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
+  #gCars { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; padding-bottom: 26px; -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 34px), transparent); mask-image: linear-gradient(180deg, #000 calc(100% - 34px), transparent); }
+  #gCarsWrap { position: relative; display: flex; flex-direction: column; min-height: 0; width: 250px; flex: 0 0 auto; }
+  #gCarsWrap::after { content: '▼ прокрутка'; position: absolute; left: 0; right: 0; bottom: 0; text-align: center; font-size: 11px; color: var(--dim); letter-spacing: 1px; pointer-events: none; }
   #gCars .card { padding: 10px 12px; }
   #gCars .card h3 { font-size: 17px; }
   .gstage { flex: 1; position: relative; min-width: 120px; cursor: grab; }
@@ -96,7 +102,7 @@
   .tabs { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
   .tabs button { padding: 7px 10px; border-radius: 8px; font-size: 13px; letter-spacing: 0.5px; background: rgba(255, 255, 255, 0.05); }
   .tabs button.on { background: var(--acc); }
-  .tabbody { overflow: auto; min-height: 0; flex: 1; padding-right: 4px; }
+  .tabbody { overflow: auto; min-height: 0; flex: 1; padding-right: 4px; padding-bottom: 18px; -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 22px), transparent); mask-image: linear-gradient(180deg, #000 calc(100% - 22px), transparent); }
   .stat { display: grid; grid-template-columns: 118px 1fr 64px; align-items: center; gap: 8px; margin: 7px 0; font-size: 14px; }
   .stat .k { color: var(--dim); }
   .stat .v { text-align: right; font-variant-numeric: tabular-nums; }
@@ -119,7 +125,7 @@
   .note { color: var(--dim); font-size: 13px; line-height: 1.4; margin: 6px 0; }
 
   /* настройки */
-  #scrSettings .box { max-width: 860px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; min-height: 0; flex: 1; }
+  #scrSettings .box { max-width: 1040px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; min-height: 0; flex: 1; }
   .set { display: grid; grid-template-columns: 1fr 300px; gap: 12px; align-items: center; padding: 9px 4px; border-bottom: 1px solid var(--line); }
   .set .k { font-size: 16px; }
   .set .k small { display: block; color: var(--dim); font-size: 12px; margin-top: 2px; }
@@ -171,7 +177,7 @@
   #hSpeedC { width: 100%; height: 100%; }
   #hNitro { right: 256px; bottom: 34px; width: 22px; height: 150px; padding: 3px; }
   #hNitro i { position: absolute; left: 3px; right: 3px; bottom: 3px; border-radius: 8px; background: linear-gradient(0deg, #1f7bff, var(--cyan)); }
-  #hNitro span { position: absolute; bottom: -18px; left: 50%; transform: translateX(-50%); font-size: 10px; color: var(--cyan); letter-spacing: 1px; }
+  #hNitro span { position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%); font-size: 9px; color: #fff; letter-spacing: 0; background: rgba(10, 9, 18, 0.8); border: 1px solid rgba(25, 211, 255, 0.5); padding: 1px 3px; border-radius: 5px; }
   #hDrift { top: 92px; left: 50%; transform: translateX(-50%); text-align: center; padding: 8px 22px; display: none; }
   #hDrift .pts { font-size: 34px; font-weight: 800; color: #ff5ad8; text-shadow: 0 0 18px rgba(255, 90, 216, 0.6); font-variant-numeric: tabular-nums; }
   #hDrift .mul { font-size: 20px; color: var(--acc2); margin-left: 6px; }
@@ -229,7 +235,7 @@
     #hSpeedo { width: 190px; height: 190px; } #hNitro { right: 214px; height: 120px; }
     #hKeys { font-size: 11px; }
     #hMap { width: 160px; height: 160px; } #hFps { top: 182px; }
-    #gPanel { width: 340px; } #gCars { width: 220px; }
+    #gPanel { width: 340px; } #gCarsWrap { width: 220px; }
     .set { padding: 6px 4px; }
   }
 </style>
@@ -286,7 +292,7 @@
 <section id="scrGarage" class="screen">
   <div class="head"><button class="back" data-back>← Назад</button><h2>Гараж</h2><span class="sp"></span><span class="money" id="gMoney"></span></div>
   <div class="cols">
-    <div id="gCars"></div>
+    <div id="gCarsWrap"><div id="gCars"></div></div>
     <div class="gstage" id="gStage"><div class="hint">Тяните мышью, чтобы повернуть машину</div></div>
     <div id="gPanel">
       <h3 id="gName" style="font-size:26px;letter-spacing:1px"></h3>

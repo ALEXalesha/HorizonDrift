@@ -18,16 +18,17 @@
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const trackDef = (id) => D.TRACKS.find((t) => t.id === id);
   const MEDAL_RU = { gold: 'Золото', silver: 'Серебро', bronze: 'Бронза' };
+  const plural = (n, one, few, many) => { const a = n % 10, b = n % 100; return a === 1 && b !== 11 ? one : a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many; };
+  const lapsText = (n) => n + ' ' + plural(n, 'круг', 'круга', 'кругов');
 
   const G = {
     settings: C.mergeSettings(load(KEY.settings)),
-    records: load(KEY.records) || { tracks: {} },
+    records: C.sanitizeRecords(load(KEY.records)),
     screen: 'boot', stack: [], race: null, cfg: null, meta: null, paused: false, manual: false, doneT: -1, resultShown: false,
     input: { thr: 0, brk: 0, steer: 0, hb: 0, nitro: 0, analog: false, shiftUp: false, shiftDown: false },
     override: null, keys: new Set(), camMode: 'chase', seedN: 0, fps: 0, frameTimes: [], restartSettings: null,
     garageCar: null, gTab: 'stats', sTab: 'sound', quick: { track: 'city', mode: 'race', opp: 3, laps: 2, diff: null, car: null },
   };
-  if (!G.records.tracks) G.records = { tracks: {} };
   G.career = new C.Career(load(KEY.career), (d) => save(KEY.career, d));
   G.camMode = G.settings.camera;
   const nextSeed = () => (FIXED_SEED ? FIXED_SEED + G.seedN++ : ((Date.now() ^ (Math.random() * 1e9)) >>> 0));
@@ -90,7 +91,7 @@
       b.dataset.cup = String(i);
       b.innerHTML = `<div class="lock">${open ? (done ? 'пройден' : 'открыт') : 'закрыт'}</div><span class="badge">Кубок ${i + 1}</span><h3>${esc(cup.name)}</h3>
         <div class="sub">${esc(cup.about)}</div><div class="sub" style="margin-top:6px">Соперники: ${cup.pool.map((c) => esc(C.carDef(c).name)).join(', ')}</div>
-        <div class="medals">${cup.events.map((e) => medalHtml(G.career.eventMedal(e.id))).join('')}</div>
+        <ul class="evlist">${cup.events.map((e) => `<li>${medalHtml(G.career.eventMedal(e.id))}<span>${esc(e.name)}</span><small>${D.EVENT_TYPES[e.type].name} · ${esc(trackDef(e.track).name)}</small></li>`).join('')}</ul>
         ${open ? '' : `<div class="sub" style="margin-top:8px">Нужна медаль в каждом событии кубка «${esc(D.CUPS[i - 1].name)}»</div>`}`;
       b.onclick = () => { G.cup = i; show('cup'); };
       g.appendChild(b);
@@ -122,7 +123,7 @@
     const g = $('eventsGrid'); g.innerHTML = '';
     cup.events.forEach((evt) => {
       const td = trackDef(evt.track), res = G.career.d.res[evt.id] || {};
-      const laps = evt.type === 'elim' ? (td.closed ? (evt.opp || 3) + ' кругов' : '') : td.closed ? (evt.laps || 1) + ' ' + (evt.laps === 1 ? 'круг' : 'круга') : 'из точки в точку';
+      const laps = evt.type === 'elim' ? (td.closed ? lapsText(evt.opp || 3) : '') : td.closed ? lapsText(evt.laps || 1) : 'из точки в точку';
       const who = evt.type === 'duel' ? 'Соперник: ' + D.RIVALS[cup.id] : evt.opp ? 'Соперников: ' + evt.opp : 'В одиночку';
       let best = '';
       if (res.best != null) best = evt.type === 'drift' ? 'Лучший: ' + Math.round(res.best).toLocaleString('ru-RU') : evt.type === 'time' ? 'Лучшее: ' + C.fmtTime(res.best) : 'Лучшее место: ' + res.best;
@@ -319,7 +320,7 @@
     return code;
   };
   function buildSettings() {
-    const s = G.settings, body = $('sBody');
+    const s = G.settings, body = $('sBody'), kb = (a) => keyName(s.bindings[a][0] || s.bindings[a][1]);
     document.querySelectorAll('#sTabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === G.sTab));
     const seg = (key, items) => `<div class="seg" data-set="${key}">${items.map((it) => `<button data-v="${it[0]}" class="${String(s[key]) === String(it[0]) ? 'on' : ''}">${it[1]}</button>`).join('')}</div>`;
     const onoff = (key) => seg(key, [[true, 'Вкл'], [false, 'Выкл']]);
@@ -332,8 +333,8 @@
     } else if (G.sTab === 'game') {
       h = row('Сложность соперников', seg('difficulty', Object.keys(D.DIFFICULTY).map((k) => [k, D.DIFFICULTY[k].name])), 'темп и число ошибок ИИ')
         + row('Скорость', seg('units', [['kmh', 'км/ч'], ['mph', 'mph']]))
-        + row('Камера по умолчанию', seg('camera', [['chase', 'Сзади'], ['far', 'Дальняя'], ['hood', 'С капота']]), 'в гонке - клавиша C')
-        + row('Коробка передач', seg('gearbox', [['auto', 'Автомат'], ['manual', 'Ручная']]), 'ручная: E - вверх, Q - вниз')
+        + row('Камера по умолчанию', seg('camera', [['chase', 'Сзади'], ['far', 'Дальняя'], ['hood', 'С капота']]), 'в гонке - клавиша ' + kb('camera'))
+        + row('Коробка передач', seg('gearbox', [['auto', 'Автомат'], ['manual', 'Ручная']]), `ручная: ${kb('shiftUp')} - вверх, ${kb('shiftDown')} - вниз`)
         + row('Антипробуксовка', onoff('tc')) + row('АБС', onoff('abs'), 'без АБС колёса блокируются, руль хуже слушается')
         + row('Помощь рулём', onoff('steerAssist'), 'меньше угол на скорости и подруливание в заносе')
         + row('Чувствительность руля', range('steerSens', 0.5, 1.6, 0.05))
@@ -382,7 +383,7 @@
     const rec = G.records.tracks, st = G.career.d.stats;
     let medals = { gold: 0, silver: 0, bronze: 0 };
     D.CUPS.forEach((c, i) => { const m = G.career.cupMedals(i); medals.gold += m.gold; medals.silver += m.silver; medals.bronze += m.bronze; });
-    let h = '<table><tr><th>Трасса</th><th>Место</th><th>Лучший круг</th><th>Лучший заезд на время</th><th>Лучший дрифт</th></tr>';
+    let h = '<table><tr><th>Трасса</th><th>Где</th><th>Лучший круг</th><th>Лучший заезд на время</th><th>Лучший дрифт</th></tr>';
     for (const t of D.TRACKS) {
       const r = rec[t.id] || {};
       h += `<tr><td>${esc(t.name)}</td><td>${esc(t.place)}</td><td>${r.lap ? C.fmtTime(r.lap) : '—'}</td><td>${r.time ? C.fmtTime(r.time) : '—'}</td><td>${r.drift ? r.drift.toLocaleString('ru-RU') : '—'}</td></tr>`;
@@ -406,7 +407,7 @@
       <li><b>На время</b> - один на трассе, медаль по времени.</li><li><b>Дуэль</b> - один на один с чемпионом кубка.</li><li><b>На вылет</b> - после каждого круга последний выбывает.</li></ul>
       <h3>Трасса</h3><ul><li>Голубая арка - следующий чекпоинт. Круг засчитывается, только если взяты все чекпоинты: срезать нельзя.</li>
       <li>Покрытие меняет сцепление: асфальт держит лучше всего, гравий хуже, снег хуже всего. Полноприводный «Буран» на гравии и снегу сильнее всех.</li>
-      <li>Красная стрелка «Не туда» - вы едете против хода. <kbd>R</kbd> вернёт на трассу.</li></ul>
+      <li>Красная стрелка «Не туда» - вы едете против хода. ${k('reset')} вернёт на трассу.</li></ul>
       <h3>Карьера</h3><ul><li>5 кубков по 3-4 события. Медаль в каждом событии открывает следующий кубок.</li>
       <li>За места и медали платят. Деньги - на машины и тюнинг в «Гараже».</li><li>Выиграйте «Гран-при Горизонта» - станете чемпионом.</li></ul>
       <h3>Советы</h3><ul><li>Тормозите до поворота, газ - на выходе.</li><li>Для заноса: скорость, руль в поворот и короткий ручник, затем газом держите угол.</li>
@@ -418,6 +419,7 @@
   let confettiRaf = 0;
   function buildVictory() {
     A.music('victory');
+    R.showroomView('menu'); R.setShowroomCar(G.career.d.current, G.career.look(G.career.d.current));
     $('creditsRoll').innerHTML = `<h4>Horizon Drift</h4><p>Аркадные гонки для «Игротеки»</p>
       <h4>Чемпион</h4><p>Это вы! Побед: ${G.career.d.stats.wins}, призовых: ${money(G.career.d.stats.earned)}</p>
       <h4>Трассы</h4><p>${D.TRACKS.map((t) => esc(t.name)).join(' · ')}</p>
@@ -449,6 +451,11 @@
     'На снегу тормозите раньше: сцепления почти вдвое меньше.', 'Удар о стену срывает серию дрифта - очки серии пропадают.', 'В паузе можно сменить камеру и управление в «Настройках».',
     'Клавиша R вернёт машину на трассу, если вы застряли.', 'Соперники тоже ошибаются - особенно на лёгкой сложности.'];
   async function startRace(cfg, meta) {
+    if (G.loading) return null;                 // второй щелчок «Заново» во время загрузки не строит второй заезд
+    G.loading = true;
+    try { return await startRaceInner(cfg, meta); } finally { G.loading = false; }
+  }
+  async function startRaceInner(cfg, meta) {
     A.init();
     stopRace();
     G.cfg = cfg; G.meta = meta; G.paused = false; G.doneT = -1; G.resultShown = false; G.camMode = G.settings.camera;
@@ -463,6 +470,7 @@
     try {
       race = new C.Race(cfg);
       const looks = cfg.entries.map((e) => e.look || C.defaultLook(e.car));
+      G.buildCount = (G.buildCount || 0) + 1;
       await R.buildRace(race, looks, (p) => { $('loadBar').style.width = Math.round(p * 100) + '%'; });
     } catch (err) {
       R.disposeRace(); G.stack = []; show('main', true); toast('Не удалось загрузить трассу');
@@ -587,7 +595,7 @@
     if (mode === 'drift' || mode === 'time' || race.cars.length === 1) setHtml('hPos', D.EVENT_TYPES[mode === 'free' ? 'race' : mode] ? `<span style="font-size:30px">${D.EVENT_TYPES[mode].name.toUpperCase()}</span>` : '');
     else setHtml('hPos', `${pl.place}<small>/${alive}</small>`);
     if (tr.closed) { setText('hLapK', 'КРУГ'); setText('hLap', `${Math.min(race.laps, pl.lap + 1)}/${race.laps}`); } else { setText('hLapK', 'ЧЕКПОИНТ'); setText('hLap', `${Math.max(0, pl.nextCp - 1)}/${tr.cps.length - 1}`); }
-    setText('hTime', C.fmtTime(pl.finished ? pl.finishT : race.t));
+    setText('hTime', race.timeLimit ? 'осталось ' + C.fmtTime(Math.max(0, race.timeLimit - race.t)) : C.fmtTime(pl.finished ? pl.finishT : race.t));
     setText('hBest', pl.bestLap ? C.fmtTime(pl.bestLap) : '--:--.--');
     setText('hDriftTotal', race.drift.total.toLocaleString('ru-RU'));
     const dr = race.drift, showDrift = dr.active && dr.pending > 0;
@@ -648,6 +656,7 @@
         case 'elim': A.play('elim'); showMsg(e.car === pl ? 'Вы выбыли' : `${e.car.name} выбывает`, '', 1800); break;
         case 'reset': showMsg('Снова на трассе', '', 900); break;
         case 'finish': showMsg('Финиш!', '', 1800); break;
+        case 'timeUp': showMsg('Время вышло', 'очки дрифта засчитаны', 1800); break;
         case 'done': G.doneT = 1.6; onRaceDone(); break;
         default: break;
       }
@@ -655,7 +664,8 @@
     race.events.length = 0;
   }
   function saveRecords(res) {
-    const r = G.records.tracks[res.track] = G.records.tracks[res.track] || {};
+    let r = G.records.tracks[res.track];
+    if (!r || typeof r !== 'object') r = G.records.tracks[res.track] = {};
     if (res.bestLap && (!r.lap || res.bestLap < r.lap)) r.lap = Math.round(res.bestLap * 1000) / 1000;
     if (res.mode === 'time' && res.time && (!r.time || res.time < r.time)) r.time = Math.round(res.time * 1000) / 1000;
     if (res.drift && (!r.drift || res.drift > r.drift)) r.drift = res.drift;
@@ -664,7 +674,7 @@
   function onRaceDone() {
     const res = G.race.result, m = G.meta || {};
     res.thresholds = m.thresholds || null;
-    saveRecords(res);
+    try { saveRecords(res); } catch (e) { G.records = { tracks: {} }; }        // испорченные рекорды не должны отнять итоги и награду
     G.lastApply = m.kind === 'career' ? G.career.applyResult(m.evtId, res) : null;
     G.lastResult = res;
   }
@@ -737,7 +747,7 @@
     if (e.code === 'Escape' && !['main', 'boot', 'load'].includes(G.screen)) { if (G.screen === 'victory') show('main'); else back(); }
   });
   document.addEventListener('keyup', (e) => { G.keys.delete(e.code); });
-  window.addEventListener('blur', () => { G.keys.clear(); clearInput(); });
+  window.addEventListener('blur', () => { G.keys.clear(); clearInput(); if (G.race && G.screen === 'race' && !G.paused && !G.resultShown && !G.manual) setPaused(true); });
   document.addEventListener('pointerdown', () => A.init());
 
   let padPrev = [];
@@ -811,7 +821,7 @@
         const pl = G.race.player;
         let near = null;
         if (pl) for (const c of G.race.cars) { if (c === pl || c.out) continue; const d = Math.hypot(c.x - pl.x, c.z - pl.z); if (!near || d < near.dist) near = { car: c, dist: d }; }
-        A.updateRace(pl, near, G.paused || G.resultShown && false);
+        A.updateRace(pl, near, G.paused || G.resultShown);            // под итогами мотор не звучит
         drawFx(pl);
       }
     } else { R.frame(dt, 1, G.camMode); drawFx(null); }
@@ -837,7 +847,8 @@
     ready: false, core: C, data: D, render: R, audio: A,
     get settings() { return G.settings; }, get career() { return G.career; }, get records() { return G.records; },
     get race() { return G.race; }, get player() { return G.race ? G.race.player : null; }, get screen() { return G.screen; },
-    get paused() { return G.paused; }, get camMode() { return G.camMode; }, get renderer() { return R.renderer; }, get lastResult() { return G.lastResult; }, get lastApply() { return G.lastApply; },
+    get paused() { return G.paused; }, get loading() { return !!G.loading; }, get buildCount() { return G.buildCount || 0; },
+    setCamera(m) { G.camMode = m; }, get camMode() { return G.camMode; }, get renderer() { return R.renderer; }, get lastResult() { return G.lastResult; }, get lastApply() { return G.lastApply; },
     set manual(v) { G.manual = !!v; }, get manual() { return G.manual; },
     setSetting, show, toMenu: quitToMenu, pause: () => setPaused(true), resume: () => setPaused(false),
     startCareer: (id) => startCareerEvent(id),
