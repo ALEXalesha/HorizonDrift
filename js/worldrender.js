@@ -102,7 +102,8 @@
       m.lampHead = new THREE.MeshBasicMaterial({ color: 0x777777 });
       m.prop = new THREE.MeshLambertMaterial({ vertexColors: true });
       m.pool = new THREE.MeshBasicMaterial({ map: glowTex('round'), side: THREE.DoubleSide, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 });
-      m.beam = new THREE.MeshBasicMaterial({ map: glowTex('cone'), side: THREE.DoubleSide, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 });
+      // свет фар ложится «экраном»: тёмный асфальт светлеет, светлая разметка не выгорает в белое пятно
+      m.beam = new THREE.MeshBasicMaterial({ map: glowTex('cone'), side: THREE.DoubleSide, transparent: true, depthWrite: false, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneMinusDstColorFactor, blendDst: THREE.OneFactor, premultipliedAlpha: true, opacity: 0, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 });
       const win = _.canvasTex(128, 128, (g, w) => {
         g.fillStyle = '#5f6776'; g.fillRect(0, 0, w, w);
         for (let y = 8; y < w; y += 32) for (let x = 8; x < w; x += 32) { g.fillStyle = _.rngOf(x * 31 + y)() < 0.55 ? '#ffd98a' : '#2a2e3a'; g.fillRect(x, y, 16, 20); }
