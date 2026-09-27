@@ -539,6 +539,7 @@
     const hit = ray.intersectObjects(objs, false)[0];
     return hit ? hit.point.y : null;
   };
+  W._build = (cx, cz, lod) => buildChunk(cx, cz, lod); W._dispose = (ch) => { for (const g of ch.geos) g.dispose(); for (const im of ch.inst) im.dispose(); };
   W.info = function () { const lods = [0, 0, 0]; for (const ch of W.chunks.values()) lods[ch.lod]++; return { chunks: W.chunks.size, lods, built: W.built, pending: W.pending, cars: W.carMeshes.size }; };
 
   W.dispose = function () {
