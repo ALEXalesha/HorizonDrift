@@ -12,6 +12,7 @@
   const G = C.G, DT = C.DT, clamp = C.clamp, lerp = C.lerp;
   const WATER = 0;
   const CHUNK = 256;
+  const TUNNEL_COVER = 9.5;          // гора над тоннелем не ниже этого над полотном
   const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 
   // ---------- шум ----------
@@ -62,7 +63,7 @@
         ['VIL', 'CAPE', 'road'], ['CAPE', 'CITY', 'highway'], ['CITY', 'C1', 'road'], ['C1', 'C2', 'road'], ['C2', 'CITY', 'road'], ['PORT', 'P1', 'road'], ['P1', 'CITY', 'road']],
       points: { radars: 7, drift: 5, jumps: 5, boards: 30 } },
     { id: 'mountains', name: 'Горы', about: 'Серпантины, снежный перевал, озеро и тайга с гравийкой.', seed: 202, scale: 1.45, tod: 11, weather: 'clear',
-      sea: [], lakes: [{ x: 2150, z: 2350, r: 520, depth: 9 }],
+      sea: [], lakes: [{ x: 1750, z: 2250, r: 420, depth: 9 }],
       regions: [
         { id: 'fest', name: 'Фестиваль', x: 0, z: 0, elev: 30, amp: 10, biome: 'grass', decor: ['tree', 'lamp'] },
         { id: 'serp', name: 'Орлиный серпантин', x: -2300, z: 1200, elev: 120, amp: 80, biome: 'rock', decor: ['pine', 'rock'], track: 'serpentine' },
@@ -95,7 +96,7 @@
         ['CANYON', 'MESA', 'dirt'], ['MESA', 'N', 'road'], ['N', 'DUNES', 'road'], ['DUNES', 'SALT', 'dirt'], ['SALT', 'GHOST', 'highway'], ['GHOST', 'CANYON', 'dirt']],
       points: { radars: 6, drift: 5, jumps: 6, boards: 30 } },
     { id: 'metro', name: 'Мегаполис', about: 'Ночной город из районов: кольцевая, развязки, набережная и промзона.', seed: 404, scale: 1.35, tod: 22, weather: 'clear', night: true,
-      sea: [{ axis: 'x', from: 3200, to: 3550 }], lakes: [{ x: 700, z: 480, r: 230, depth: 5 }],
+      sea: [{ axis: 'x', from: 2870, to: 3300 }], lakes: [{ x: 700, z: 480, r: 230, depth: 5 }],
       regions: [
         { id: 'fest', name: 'Площадь', x: 0, z: 0, elev: 10, amp: 2, biome: 'concrete', decor: ['building', 'lamp'] },
         { id: 'down', name: 'Центр', x: 1300, z: 900, elev: 8, amp: 2, biome: 'concrete', decor: ['building', 'lamp'], track: 'city' },
@@ -205,10 +206,7 @@
         const t = (s - cum[j]) / Math.max(1e-9, cum[j + 1] - cum[j]);
         pts.push([lerp(dense[j][0], dense[j + 1][0], t), lerp(dense[j][1], dense[j + 1][1], t), ei, s]);
       }
-      // покрытие: шоссе - асфальт; просёлок - гравий или снег; дорога и серпантин - по природе середины
-      const mid = pts[(edge.i0 + edge.i1) >> 1], bio = R[regionMix(mid[0], mid[1], mixTmp).i].biome;
-      if (e[2] === 'dirt') edge.surf = bio === 'snow' ? 'snow' : 'gravel';
-      else if (e[2] !== 'highway' && bio === 'snow') edge.surf = 'snow';
+      edge.surf = e[2] === 'dirt' ? 'gravel' : 'asphalt';          // основное покрытие; по точкам - массив SF ниже
       edges.push(edge);
       A.edges.push(ei); B.edges.push(ei);
     });
@@ -268,7 +266,27 @@
         K[i] = Math.abs(2 * ((bx - ax) * (cz - az) - (bz - az) * (cx - ax)) / Math.max(1e-6, ab * bc * ca));
       }
     }
-    Object.assign(M, { nodes, edges, N, X, Z, Y, RAW, TX, TZ, S, K, E, FL });
+    // Покрытие в каждой точке: снег - только там, где снежная природа именно в этой точке;
+    // участки короче 80 м сливаются с соседями, чтобы покрытие не мигало.
+    const SF = new Array(N);
+    for (const e of edges) {
+      for (let i = e.i0; i <= e.i1; i++) {
+        const bio = R[regionMix(X[i], Z[i], mixTmp).i].biome;
+        SF[i] = e.type === 'dirt' ? (bio === 'snow' ? 'snow' : 'gravel') : e.type !== 'highway' && bio === 'snow' ? 'snow' : e.surf;
+      }
+      for (let pass = 0; pass < 2; pass++) {
+        for (let i = e.i0; i <= e.i1;) {
+          let j = i; while (j <= e.i1 && SF[j] === SF[i]) j++;
+          if (j - i < 40 && (i > e.i0 || j <= e.i1)) { const fill = i > e.i0 ? SF[i - 1] : SF[j]; for (let k = i; k < j; k++) SF[k] = fill; }
+          i = j;
+        }
+      }
+    }
+    // зона у въездов тоннелей: земля по сторонам ровняется под дорогу, над входом - портал
+    for (const e of edges) {
+      for (let i = e.i0; i <= e.i1; i++) if ((FL[i] & 2) && !(FL[i - 1] & 2 && FL[i + 1] & 2)) for (let k = -8; k <= 8; k++) { const q = i + k; if (q >= e.i0 && q <= e.i1 && !(FL[q] & 2)) FL[q] |= 4; }
+    }
+    Object.assign(M, { nodes, edges, N, X, Z, Y, RAW, TX, TZ, S, K, E, FL, SF });
 
     // --- сетка для быстрого поиска ближайшей дороги ---
     const CELL = 32, grid = new Map();
@@ -295,12 +313,12 @@
       if (bi < 0) return null;
       out = out || {};
       const e = edges[E[bi]], j = bi + 1;
-      out.i = bi; out.t = bt; out.edge = e; out.hw = e.hw; out.surf = e.surf; out.d = Math.sqrt(best);
+      out.i = bi; out.t = bt; out.edge = e; out.hw = e.hw; out.surf = SF[bt < 0.5 ? bi : j]; out.d = Math.sqrt(best);
       out.y = lerp(Y[bi], Y[j], bt); out.raw = lerp(RAW[bi], RAW[j], bt);
       let tx = lerp(TX[bi], TX[j], bt), tz = lerp(TZ[bi], TZ[j], bt); const l = Math.hypot(tx, tz) || 1; tx /= l; tz /= l;
       out.tx = tx; out.tz = tz; out.nx = -tz; out.nz = tx;
       out.lat = (x - lerp(X[bi], X[j], bt)) * out.nx + (z - lerp(Z[bi], Z[j], bt)) * out.nz;
-      out.bridge = !!(FL[bi] & 1); out.tunnel = !!(FL[bi] & 2);
+      out.bridge = !!(FL[bi] & 1); out.tunnel = !!(FL[bi] & 2); out.portal = !!(FL[bi] & 4);
       out.s = lerp(S[bi], S[j], bt);
       return out;
     }
@@ -312,7 +330,7 @@
       if (!q) return raw;
       const hw = q.hw;
       if (q.bridge) return q.d < hw + 1.5 && raw > q.y - 0.3 ? q.y - 0.3 : raw;
-      if (q.tunnel) { const t = smooth(hw + 3, hw + 10, q.d); return lerp(q.y - 0.3, raw, t); }
+      if (q.tunnel) { const cover = Math.max(raw, q.y + TUNNEL_COVER); return lerp(cover, raw, smooth(hw + 6, hw + 18, q.d)); }
       const t = smooth(hw + 1.5, hw + 26, q.d);
       return lerp(q.y - 0.3, raw, t);
     }
@@ -422,10 +440,16 @@
     }
     function groundAtRaw(x, z) { const q = nearestRoad(x, z, nrTmp); if (q && q.d <= q.hw + 0.6) return q.y; return terrainHeight(x, z); }
     const gq = {};
-    M.groundAt = function (x, z, out) {
+    // yRef - высота машины: под мостом полотно моста не земля, над тоннелем по горе - тоже.
+    M.groundAt = function (x, z, out, yRef) {
       out = out || {};
       const q = nearestRoad(x, z, gq);
-      if (q && q.d <= q.hw + 0.6) { out.y = q.y; out.surf = q.surf; out.onRoad = true; out.q = q; } else { out.y = terrainHeight(x, z); out.surf = M.surfAt(x, z); out.onRoad = false; out.q = q; }
+      let road = !!q && q.d <= q.hw + 0.6;
+      if (q && yRef !== undefined) {
+        if (road && q.bridge && yRef < q.y - 1.5) road = false;
+        if (q.tunnel) road = yRef <= q.y + 4 && q.d <= q.hw + 2;
+      }
+      if (road) { out.y = q.y; out.surf = q.surf; out.onRoad = true; out.q = q; } else { out.y = terrainHeight(x, z); out.surf = M.surfAt(x, z); out.onRoad = false; out.q = q; }
       const ry = rampHeight(x, z);
       if (ry > out.y) { out.y = ry; out.onRoad = true; out.surf = 'asphalt'; out.ramp = true; } else out.ramp = false;
       out.water = out.y < WATER - 0.2;
@@ -441,28 +465,57 @@
       const x0 = cx * CHUNK, z0 = cz * CHUNK;
       const reg = M.regionAt(x0 + CHUNK / 2, z0 + CHUNK / 2);
       const decor = reg.decor || [];
+      const keepOut = (x, z, extra) => { for (const pt of P) { const rr = pt.type === 'fest' ? 62 : pt.type === 'board' ? 4 : pt.type === 'jump' ? 16 : 12; if (Math.abs(pt.x - x) < rr + extra && Math.abs(pt.z - z) < rr + extra && Math.hypot(pt.x - x, pt.z - z) < rr + extra) return true; } return false; };
       const dens = { tree: 22, pine: reg.biome === 'forest' ? 34 : 16, snowpine: 20, palm: 10, cactus: 12, rock: 7 };
       for (const type of decor) {
         if (!(type in dens)) continue;
         for (let n = 0; n < dens[type]; n++) {
           const x = x0 + r() * CHUNK, z = z0 + r() * CHUNK, s = 0.75 + r() * 0.7, rot = r() * 6.283;
           const q = nearestRoad(x, z, nrTmp); if (q && q.d < q.hw + 6) continue;
+          if (keepOut(x, z, 2)) continue;
           const y = terrainHeight(x, z); if (y < WATER + 0.4) continue;
           if (Math.abs(x) > half || Math.abs(z) > half) continue;
           out.push({ type, x, y, z, s, rot, r: PROP_R[type] * s * (type === 'rock' ? 1 : 1) });
         }
       }
       if (decor.includes('building') || decor.includes('container')) {
+        // дома и контейнеры - рядами вдоль улиц: фасадом к дороге, за тротуаром; в центре города - небоскрёбы
         const btype = decor.includes('building') ? 'building' : 'container';
-        const count = btype === 'building' ? (reg.biome === 'concrete' ? 10 : 4) : 12;
-        for (let n = 0; n < count; n++) {
-          const x = x0 + r() * CHUNK, z = z0 + r() * CHUNK;
-          const q = nearestRoad(x, z, nrTmp);
-          const w = btype === 'building' ? 14 + r() * 14 : 2.5, d = btype === 'building' ? 14 + r() * 12 : 6.1, h = btype === 'building' ? (reg.biome === 'concrete' ? 12 + r() * 50 : 7 + r() * 6) : 2.6 * (1 + Math.floor(r() * 3));
-          if (!q || q.d < q.hw + 6 + Math.max(w, d) * 0.72 || q.d > 90) continue;
-          if (out.some((o) => (o.type === btype) && Math.abs(o.x - x) < (o.w + w) * 0.6 && Math.abs(o.z - z) < (o.d + d) * 0.6)) continue;
-          const y = terrainHeight(x, z); if (y < WATER + 0.4) continue;
-          out.push({ type: btype, x, y, z, w, d, h, rot: Math.atan2(q.tx, q.tz), r: Math.min(w, d) * 0.5, col: r() });
+        const urban = reg.biome === 'concrete', rc = R.filter((rg) => (rg.decor || []).includes('building') && rg.biome === 'concrete');
+        const segs = M.roadSamplesIn(cx, cz, 0), spacing = btype === 'container' ? 9 : urban ? 22 : 34;
+        const boxes = [];
+        const overlaps = (x, z, rad) => boxes.some((b) => Math.hypot(b[0] - x, b[1] - z) < b[2] + rad);
+        let lastS = -1e9, lastE = -1;
+        for (const i of segs) {
+          if (FL[i]) continue;
+          const e = edges[E[i]];
+          if (E[i] === lastE && Math.abs(S[i] - lastS) < spacing) continue;
+          lastE = E[i]; lastS = S[i];
+          let nearNode = false; for (const nk of [e.a, e.b]) if (Math.hypot(nodes[nk].x - X[i], nodes[nk].z - Z[i]) < 45) nearNode = true;
+          if (nearNode) continue;
+          for (const side of [-1, 1]) {
+            for (let row = 0; row < (urban ? 2 : 1); row++) {
+              if (!urban && r() < 0.45) continue;
+              let w, d, h;
+              if (btype === 'container') { w = 2.5; d = 6.1; h = 2.6 * (1 + Math.floor(r() * 3)); }
+              else {
+                w = 14 + r() * 8; d = 12 + r() * 10;
+                const core = rc.reduce((m, rg) => Math.min(m, Math.hypot(rg.x - X[i], rg.z - Z[i])), 1e9);
+                h = urban ? 10 + r() * 22 : 6 + r() * 7;
+                if (urban && core < 520 && r() < 0.45) { h = 50 + r() * 90; w = 16 + r() * 6; d = 16 + r() * 6; }
+              }
+              const set = e.hw + 4.5 + (btype === 'container' ? 3 : 0) + d / 2 + row * (d + 8);
+              const x = X[i] + (-TZ[i]) * side * set, z = Z[i] + TX[i] * side * set;
+              if (Math.floor(x / CHUNK) !== cx || Math.floor(z / CHUNK) !== cz) continue;
+              if (Math.abs(x) > half || Math.abs(z) > half) continue;
+              const rad = Math.hypot(w, d) * 0.5;
+              const q = nearestRoad(x, z, nrTmp); if (q && q.d < q.hw + 3.5 + Math.min(w, d) * 0.5) continue;
+              if (overlaps(x, z, rad) || keepOut(x, z, rad)) continue;
+              const y = terrainHeight(x, z); if (y < WATER + 0.4) continue;
+              boxes.push([x, z, rad]);
+              out.push({ type: btype, x, y, z, w, d, h, rot: Math.atan2(TX[i], TZ[i]), r: rad, box: true, col: r() });
+            }
+          }
         }
       }
       decorCache.set(k, out);
@@ -518,7 +571,7 @@
   function newSave(mapId) {
     const M = buildMap(mapId);
     const disc = {}; for (const p of M.points) if (p.open) disc[p.id] = true;
-    return { v: 1, map: mapId, pos: null, disc, boards: {}, rec: { radar: {}, drift: {}, jump: {} }, weather: M.def.weather, tod: M.def.tod, autoTime: true };
+    return { v: 1, map: mapId, pos: null, disc, boards: {}, rec: { radar: {}, drift: {}, jump: {} }, weather: M.def.weather, tod: M.def.tod, autoTime: true, day: 0, duels: {} };
   }
 
   // Сохранение карты из хранилища: только известные точки, числа в пределах, положение внутри карты.
@@ -532,12 +585,16 @@
     for (const k in obj(o.boards)) if (ids.has(k) && k.startsWith('board-') && o.boards[k] === true) s.boards[k] = true;
     const rec = obj(o.rec);
     for (const t of ['radar', 'drift', 'jump']) for (const k in obj(rec[t])) { const n = Number(rec[t][k]); if (ids.has(k) && Number.isFinite(n) && n > 0) s.rec[t][k] = n; }
-    if (WEATHER[o.weather]) s.weather = o.weather;
+    if (typeof o.weather === 'string' && Object.prototype.hasOwnProperty.call(WEATHER, o.weather)) s.weather = o.weather;
+    if (Number.isInteger(o.day) && o.day >= 0 && o.day < 1e6) s.day = o.day;
+    for (const k in obj(o.duels)) if (Number.isInteger(o.duels[k])) s.duels[k] = o.duels[k];
     if (typeof o.tod === 'number' && o.tod >= 0 && o.tod < 24) s.tod = o.tod;
     if (typeof o.autoTime === 'boolean') s.autoTime = o.autoTime;
     if (typeof o.car === 'string' && D.CARS.some((c) => c.id === o.car)) s.car = o.car;
     return s;
   }
+
+  const weatherOf = (name) => (Object.prototype.hasOwnProperty.call(WEATHER, name) ? WEATHER[name] : WEATHER.clear);
 
   function collidePair(a, b) {
     for (let ka = -1.15; ka <= 1.15; ka += 2.3) {
@@ -559,6 +616,28 @@
     }
   }
 
+  // Машина (два круга r=1 на носу и корме) против повёрнутой коробки дома или контейнера.
+  function collideBox(c, d) {
+    if (c.y > d.y + d.h || Math.abs(c.x - d.x) > d.r + 3.5 || Math.abs(c.z - d.z) > d.r + 3.5) return;
+    const cs = Math.cos(d.rot), sn = Math.sin(d.rot), hw = d.w / 2, hd = d.d / 2, rad = 1.0;
+    for (const k of [1.6, 0, -1.6]) {
+      const px = c.x + Math.sin(c.h) * k, pz = c.z + Math.cos(c.h) * k, dx = px - d.x, dz = pz - d.z;
+      const lx = dx * cs - dz * sn, lz = dx * sn + dz * cs;
+      let nlx, nlz, pen;
+      const cxl = Math.max(-hw, Math.min(hw, lx)), czl = Math.max(-hd, Math.min(hd, lz));
+      const ex = lx - cxl, ez = lz - czl, dist = Math.hypot(ex, ez);
+      if (dist > 1e-6) { if (dist >= rad) continue; nlx = ex / dist; nlz = ez / dist; pen = rad - dist; }
+      else {                                              // центр круга внутри - выталкиваем по ближней стороне
+        const ox = hw - Math.abs(lx), oz = hd - Math.abs(lz);
+        if (ox < oz) { nlx = Math.sign(lx) || 1; nlz = 0; pen = ox + rad; } else { nlx = 0; nlz = Math.sign(lz) || 1; pen = oz + rad; }
+      }
+      const nx = nlx * cs + nlz * sn, nz = -nlx * sn + nlz * cs;
+      c.x += nx * pen; c.z += nz * pen;
+      const vn = c.vx * nx + c.vz * nz;
+      if (vn < 0) { c.vx -= 1.3 * vn * nx; c.vz -= 1.3 * vn * nz; c.w *= 0.5; c.hit = Math.max(c.hit || 0, -vn); }
+    }
+  }
+
   class World {
     // opts: { map, car, upg, look, save, seed, assist, traffic }
     constructor(opts) {
@@ -576,7 +655,7 @@
       if (p && isFinite(p.x)) this.placeAt(p.x, p.z, p.h); else this.placeAtPoint('fest');
       this.initRivals();
     }
-    get weather() { return this.save.weather; }
+    get weather() { return Object.prototype.hasOwnProperty.call(WEATHER, this.save.weather) ? this.save.weather : 'clear'; }
     // Поставить машину на дорогу рядом с точкой (x, z), носом по ходу дороги (ближе к heading).
     placeAt(x, z, heading) {
       const c = this.player, M = this.M;
@@ -635,6 +714,20 @@
       this.cars.push(c);
       return a;
     }
+    // Видит ли игрок машину: ближе 160 м и спереди-сбоку от камеры (камера смотрит по курсу игрока).
+    seenByPlayer(c) {
+      const p = this.player, dx = c.x - p.x, dz = c.z - p.z, d = Math.hypot(dx, dz);
+      if (d > 160) return false;
+      return d < 25 || (dx * Math.sin(p.h) + dz * Math.cos(p.h)) / d > -0.2;
+    }
+    // Поставить ИИ на его полосу там, где он сейчас на своём ребре.
+    aiToLane(a) {
+      const M = this.M, e = M.edges[a.edge], c = a.car, i = clamp(a.i, e.i0 + 2, e.i1 - 2), lane = a.dir * e.hw * 0.48;
+      c.x = M.X[i] + (-M.TZ[i]) * lane; c.z = M.Z[i] + M.TX[i] * lane; c.h = Math.atan2(M.TX[i] * a.dir, M.TZ[i] * a.dir);
+      c.vx = c.vz = c.w = 0; c.y = M.Y[i]; c.air = false; c.vy = 0; c.gear = 1;
+      a.stuckT = 0; a.stuckTotal = 0; a.reverseT = 0; a.resets = (a.resets || 0) + 1;
+      this.events.push({ type: 'aiReset', car: c });
+    }
     removeAi(a) {
       this.cars.splice(this.cars.indexOf(a.car), 1);
       const L = a.rival ? this.rivals : this.traffic; L.splice(L.indexOf(a), 1);
@@ -662,6 +755,18 @@
     // ИИ свободной езды: по полосе своей стороны, на развилке - случайное продолжение.
     aiDrive(a, dt) {
       const M = this.M, c = a.car, e = M.edges[a.edge];
+      // застрял: 2 с задним ходом с обратным рулём; дольше 5 с и игрок не видит - на полосу
+      if (dt > 0) {
+        a.stuckT = c.speed < 1.2 && !a.reverseT ? (a.stuckT || 0) + dt : Math.max(0, (a.stuckT || 0) - dt * 0.5);
+        if (a.stuckT > 1.5 && !a.reverseT) { a.reverseT = 1.8; a.revSteer = c.inp.steer > 0 ? -1 : 1; }
+        if (a.reverseT) {
+          a.reverseT = Math.max(0, a.reverseT - dt); a.stuckTotal = (a.stuckTotal || 0) + dt;
+          c.inp.thr = 0; c.inp.brk = 1; c.inp.steer = a.revSteer; c.inp.hb = 0; c.inp.nitro = 0; c.inp.analog = true;
+          if (a.stuckTotal > 5 && c !== this.player && !this.seenByPlayer(c)) this.aiToLane(a);
+          return;
+        }
+        if (c.speed > 4) a.stuckTotal = 0;
+      }
       // где мы на ребре
       let bi = a.i, bd = 1e18;
       for (let k = a.i - 8; k <= a.i + 8; k++) { if (k < e.i0 || k > e.i1) continue; const d = (M.X[k] - c.x) ** 2 + (M.Z[k] - c.z) ** 2; if (d < bd) { bd = d; bi = k; } }
@@ -680,7 +785,15 @@
       a.turned = false;
       const v = c.speed, E2 = M.edges[a.edge];
       const la = Math.round((6 + v * 0.45) / E2.step), j = clamp(a.i + a.dir * la, E2.i0, E2.i1);
-      const lane = a.dir * E2.hw * 0.45;
+      let lane = a.dir * E2.hw * 0.48;
+      // встречный впереди на той же стороне - прижаться вправо и сбросить скорость
+      let oncoming = false;
+      for (const o of this.cars) {
+        if (o === c) continue;
+        const ox = o.x - c.x, oz = o.z - c.z, ahead = ox * Math.sin(c.h) + oz * Math.cos(c.h), side = ox * -Math.cos(c.h) + oz * Math.sin(c.h);
+        const face = Math.sin(c.h) * Math.sin(o.h) + Math.cos(c.h) * Math.cos(o.h);
+        if (face < -0.3 && ahead > 0 && ahead < 60 && Math.abs(side) < 4) { oncoming = true; lane = a.dir * Math.min(E2.hw - 1.2, E2.hw * 0.7); }
+      }
       const tx = M.X[j] + (-M.TZ[j]) * lane, tz = M.Z[j] + M.TX[j] * lane;
       const fx = Math.sin(c.h), fz = Math.cos(c.h), dx = tx - c.x, dz = tz - c.z;
       const ang = Math.atan2(dx * -fz + dz * fx, Math.max(0.5, dx * fx + dz * fz)), dist = Math.hypot(dx, dz) || 1;
@@ -688,8 +801,8 @@
       c.inp.steer = clamp((Math.atan2(2 * 2.6 * Math.sin(ang), dist) * 1.25 + c.beta * 0.7) / smax, -1, 1); c.inp.analog = true;
       // скорость: по кривизне впереди
       let vt = a.cruise;
-      const wg = (WEATHER[this.save.weather] || WEATHER.clear).grip[E2.surf] || 1;
-      const mu = c.st.grip * C.surfMu(E2.surf, c.st) * wg * 0.78, dec = mu * G * 0.55;
+      const sfHere = M.SF[a.i], wg = weatherOf(this.save.weather).grip[sfHere] || 1;
+      const mu = c.st.grip * C.surfMu(sfHere, c.st) * wg * 0.78, dec = mu * G * 0.55;
       for (let q = 0; q < 90; q += 3) {
         const k = clamp(a.i + a.dir * q, E2.i0, E2.i1), kap = M.K[k];
         if (kap > 1e-4) vt = Math.min(vt, Math.sqrt(mu * G / kap + 2 * dec * q * E2.step));
@@ -708,6 +821,19 @@
         const vj = ang < 0.25 ? a.cruise : Math.sqrt(mu * G * 14 / ang);
         vt = Math.min(vt, Math.sqrt(vj * vj + 2 * dec * left * E2.step));
       }
+      if (oncoming) vt = Math.min(vt, a.cruise * 0.55);
+      // ушёл с дороги - медленно, пока не вернётся
+      const qn = M.nearestRoad(c.x, c.z, this.aiQ || (this.aiQ = {}));
+      if (!qn || qn.d > qn.hw - 0.4) vt = Math.min(vt, qn && qn.d < qn.hw + 4 ? 12 : 7);
+      // перед узлом уступить тому, кто к нему ближе
+      if (left * E2.step < 45) {
+        const nd = M.nodes[a.dir > 0 ? E2.b : E2.a], mine = Math.hypot(nd.x - c.x, nd.z - c.z);
+        for (const o of this.cars) {
+          if (o === c) continue;
+          const dn = Math.hypot(nd.x - o.x, nd.z - o.z);
+          if (dn < mine && dn < 30 && o.speed > 1) { vt = Math.min(vt, Math.max(2, (mine - 18) * 0.4)); break; }
+        }
+      }
       // не въезжать в машину впереди
       for (const o of this.cars) {
         if (o === c) continue;
@@ -722,14 +848,13 @@
     // Один шаг машины в мире: шины на земле, полёт в воздухе, земля по функции рельефа (не по сетке).
     stepCarWorld(c, dt) {
       const M = this.M, g = this.g;
-      const g0 = M.groundAt(c.x, c.z, g);
+      const g0 = M.groundAt(c.x, c.z, g, c.y);
       c.surf = g0.surf; c.onRunoff = !g0.onRoad;
-      const wg = WEATHER[this.save.weather] || WEATHER.clear;
-      c.gripMul = wg.grip[g0.surf] || 1;
+      c.gripMul = weatherOf(this.save.weather).grip[g0.surf] || 1;
       const yPrev = c.y;
       if (!c.air) C.stepCar(c, dt, g0.surf);
       else { c.x += c.vx * dt; c.z += c.vz * dt; c.h -= c.w * dt; c.w *= 1 - dt * 0.5; c.speed = Math.hypot(c.vx, c.vz); c.skidR = c.skidF = 0; }
-      const g1 = M.groundAt(c.x, c.z, g);
+      const g1 = M.groundAt(c.x, c.z, g, c.y);
       if (!c.air) {
         if (g1.y >= yPrev - 0.35) { c.vy = (g1.y - yPrev) / dt; c.y = g1.y; } else { c.air = true; c.airT = 0; c.vy = Math.min(c.vy || 0, 12); }
       }
@@ -758,6 +883,7 @@
         if ((ox === -1 && lx > 12) || (ox === 1 && lx < CHUNK - 12) || (oz === -1 && lz > 12) || (oz === 1 && lz < CHUNK - 12)) continue;
         for (const d of M.chunkDecor(cx + ox, cz + oz)) {
           if (!d.r) continue;
+          if (d.box) { collideBox(c, d); continue; }
           const dx = c.x - d.x, dz = c.z - d.z, dist = Math.hypot(dx, dz), min = d.r + 1.0;
           if (dist >= min || dist < 1e-6 || c.y > d.y + (d.h || 6)) continue;
           const nx = dx / dist, nz = dz / dist; c.x += nx * (min - dist); c.z += nz * (min - dist);
@@ -771,7 +897,7 @@
       dt = dt || DT;
       const M = this.M, p = this.player;
       this.t += dt;
-      if (this.save.autoTime) this.save.tod = (this.save.tod + dt / 40) % 24;        // час игры = 40 с
+      if (this.save.autoTime) { this.save.tod += dt / 40; if (this.save.tod >= 24) { this.save.tod -= 24; this.save.day = (this.save.day || 0) + 1; } }   // час игры = 40 с
       for (const c of this.cars) { c.hit = 0; c.landed = false; c.prevX = c.x; c.prevZ = c.z; }
       if (pin && !p.autopilot) {
         const q = p.inp; q.thr = pin.thr || 0; q.brk = pin.brk || 0; q.steer = pin.steer || 0; q.hb = pin.hb ? 1 : 0; q.nitro = pin.nitro ? 1 : 0; q.analog = !!pin.analog;
@@ -786,7 +912,7 @@
         if (Math.abs(a.x - b.x) < 6 && Math.abs(a.z - b.z) < 6) collidePair(a, b);
       }
       // после всех сдвигов (стены, деревья, машины) - снова на землю: не ниже, а на земле - ровно по ней
-      for (const c of this.cars) { const gy = M.groundAt(c.x, c.z, this.g).y; if (!c.air || c.y < gy) c.y = gy; }
+      for (const c of this.cars) { const gy = M.groundAt(c.x, c.z, this.g, c.y).y; if (!c.air || c.y < gy) c.y = gy; }
       p.nitro = Math.min(1, p.nitro + dt * 0.02);
       if (p.inWater) { this.events.push({ type: 'water' }); this.resetPlayer(); }
       this.points(dt);
@@ -820,7 +946,9 @@
       const q = M.nearestRoad(p.x, p.z);
       let zone = null;
       if (q) for (const pt of M.points) if (pt.type === 'drift' && q.i >= pt.i0 && q.i <= pt.i1) zone = pt;
-      if (zone && !this.zone) { this.zone = zone; this.drift = new C.DriftScorer(); this.events.push({ type: 'zoneIn', point: zone }); }
+      const fwd = q ? p.vx * q.tx + p.vz * q.tz : 0;                 // вдоль зоны (от начала к концу) - плюс
+      if (zone && !this.zone && fwd > 3) { this.zone = zone; this.drift = new C.DriftScorer(); this.events.push({ type: 'zoneIn', point: zone }); }
+      if (this.zone && fwd < -3) { this.zone = null; this.events.push({ type: 'zoneCancel' }); }
       if (this.zone) {
         this.drift.update(dt, Math.abs(p.beta) * 57.2958, p.speed, !p.onRunoff);
         if (p.hit > 2.5 && this.drift.crash()) this.events.push({ type: 'comboLost' });
