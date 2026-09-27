@@ -975,7 +975,8 @@
       b.innerHTML = `<h3>${esc(def.name)}</h3><div class="sub">${esc(def.about)}</div><canvas width="512" height="512"></canvas>
         <div class="kv"><span>Размер</span><b>${(M.half * 2 / 1000).toFixed(1)} × ${(M.half * 2 / 1000).toFixed(1)} км</b><span>Дорог</span><b>${(M.totalRoad / 1000).toFixed(0)} км</b>
         <span>Путь насквозь</span><b>~${Math.round(mapSpanMinutes(M))} мин</b>
-        <span>Точки</span><b>${cnt.event || 0} соб. · ${cnt.radar || 0} рад. · ${cnt.drift || 0} дриф. · ${cnt.jump || 0} рамп</b>
+        <span>События · радары</span><b>${cnt.event || 0} · ${cnt.radar || 0}</b>
+        <span>Зоны дрифта · рампы</span><b>${cnt.drift || 0} · ${cnt.jump || 0}</b>
         <span>Щиты</span><b>${got} / ${boards.length}</b><span>Открыто</span><b>${disc} / ${M.points.length}</b>
         <span>Погода, время</span><b>${hh(def.tod)} · ${WD.WEATHER[def.weather].name.toLowerCase()}</b>${sv.pos ? '<span>Сохранено</span><b>место на карте</b>' : ''}</div>`;
       b.querySelector('canvas').getContext('2d').drawImage(mapImage(def.id).canvas, 0, 0);

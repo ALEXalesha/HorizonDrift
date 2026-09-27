@@ -101,7 +101,7 @@
       m.rock = new THREE.MeshLambertMaterial({ map: detail, color: 0x857a6c, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
       m.lampHead = new THREE.MeshBasicMaterial({ color: 0x777777 });
       m.prop = new THREE.MeshLambertMaterial({ vertexColors: true });
-      m.pool = new THREE.MeshBasicMaterial({ map: glowTex('round'), side: THREE.DoubleSide, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 });
+      m.pool = new THREE.MeshBasicMaterial({ map: glowTex('round'), side: THREE.DoubleSide, transparent: true, depthWrite: false, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneMinusDstColorFactor, blendDst: THREE.OneFactor, premultipliedAlpha: true, opacity: 0, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 });
       // свет фар ложится «экраном»: тёмный асфальт светлеет, светлая разметка не выгорает в белое пятно
       m.beam = new THREE.MeshBasicMaterial({ map: glowTex('cone'), side: THREE.DoubleSide, transparent: true, depthWrite: false, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneMinusDstColorFactor, blendDst: THREE.OneFactor, premultipliedAlpha: true, opacity: 0, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 });
       const win = _.canvasTex(128, 128, (g, w) => {
@@ -666,7 +666,7 @@
     // свет: фонари и фары - в темноте, в тумане и в дождь; мокрый асфальт темнее, пятна света ярче
     const dark = Math.max(T.dark, wth === 'fog' ? 0.5 : 0, wth === 'rain' ? 0.35 : 0);
     W.mat.lampHead.color.setScalar(0.47 + 0.53 * dark); if (dark > 0.3) W.mat.lampHead.color.setRGB(1, 0.94, 0.75);
-    W.mat.pool.opacity = dark * (wth === 'rain' ? 0.95 : 0.7);
+    W.mat.pool.opacity = dark * (wth === 'rain' ? 0.7 : 0.55);
     W.mat.building.emissiveIntensity = T.night ? 0.9 : 0;
     W.headlight.intensity = dark * 3.2;
     W.water.position.x = Math.round(p.x / 1000) * 1000; W.water.position.z = Math.round(p.z / 1000) * 1000;
