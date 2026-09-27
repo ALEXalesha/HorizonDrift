@@ -109,6 +109,18 @@
     W.applySettings(settings);
     // сразу загрузить кусок под машиной и соседей, чтобы не ждать
     W.stream(true);
+    // общие материалы и геометрии тоже сразу: иначе они догружаются, когда впервые попадут в кадр
+    const warm = new THREE.Group(), basic = new THREE.MeshBasicMaterial();
+    for (const g of Object.values(W.geo)) warm.add(new THREE.Mesh(g, basic));
+    const mats = [W.mat.terrain, W.mat.concrete, W.mat.rail, W.mat.tunnel, W.mat.tunnelLight, W.mat.lampPole, W.mat.lampHead, W.mat.prop, W.mat.building, W.mat.container, ...Object.values(W.mat.road)];
+    mats.forEach((m, k) => { const mesh = new THREE.Mesh(W.geo.building, m); mesh.position.x = k; warm.add(mesh); });
+    // дождь, следы шин и частицы тоже: до первого дождя и первого заноса они в кадр не попадают
+    for (const o of [W.rain, W.skids.mesh, W.parts.pts, W.snowP.pts]) { o.userData.parent = o.parent; warm.add(o); }
+    const rv = W.rain.visible; W.rain.visible = true; W.skids.mesh.geometry.setDrawRange(0, 6);
+    preupload(warm); basic.dispose();
+    W.rain.visible = rv; W.skids.mesh.geometry.setDrawRange(0, 0);
+    for (const o of [W.rain, W.skids.mesh, W.parts.pts, W.snowP.pts]) o.userData.parent.add(o);
+    preupload(W.markers.group);
     return W;
   };
 
@@ -155,6 +167,9 @@
   function buildMarkers(M, world) {
     const cap = R._.capture(() => {
       const group = new THREE.Group(), boards = {}, anim = [];
+      // одна текстура на все щиты
+      const boardTex = R._.canvasTex(256, 128, (c, w, h) => { const gr = c.createLinearGradient(0, 0, w, 0); gr.addColorStop(0, '#ff3c00'); gr.addColorStop(1, '#ffd23a'); c.fillStyle = gr; c.fillRect(0, 0, w, h); c.fillStyle = '#fff'; c.font = 'bold 44px Bahnschrift, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('HORIZON', w / 2, h / 2 - 16); c.font = 'bold 30px Bahnschrift, sans-serif'; c.fillText('ЩИТ', w / 2, h / 2 + 24); }, true);
+      const boardMat = new THREE.MeshLambertMaterial({ map: boardTex }), legMat = new THREE.MeshLambertMaterial({ color: 0x2a2c33 }), legGeo = new THREE.BoxGeometry(0.15, 3, 0.15), plateGeo = new THREE.BoxGeometry(3.6, 1.8, 0.12);
       const S = world.save;
       const sign = (text, color, x, y, z, s) => {
         const m = new THREE.Mesh(new THREE.PlaneGeometry(8 * (s || 1), 2 * (s || 1)), new THREE.MeshBasicMaterial({ map: labelTex(text, color), side: THREE.DoubleSide, transparent: true, fog: false }));
@@ -199,10 +214,8 @@
           sign('РАМПА', '#ffb02e', rp.x, rp.y0 + 7, rp.z, 0.6);
         } else if (p.type === 'board') {
           const g = new THREE.Group(); g.position.set(p.x, y, p.z); g.rotation.y = p.rot;
-          const legMat = new THREE.MeshLambertMaterial({ color: 0x2a2c33 });
-          for (const sx of [-1.4, 1.4]) { const leg = new THREE.Mesh(new THREE.BoxGeometry(0.15, 3, 0.15), legMat); leg.position.set(sx, 1.5, 0); g.add(leg); }
-          const bt = R._.canvasTex(256, 128, (c, w, h) => { const gr = c.createLinearGradient(0, 0, w, 0); gr.addColorStop(0, '#ff3c00'); gr.addColorStop(1, '#ffd23a'); c.fillStyle = gr; c.fillRect(0, 0, w, h); c.fillStyle = '#fff'; c.font = 'bold 44px Bahnschrift, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('HORIZON', w / 2, h / 2 - 16); c.font = 'bold 30px Bahnschrift, sans-serif'; c.fillText('ЩИТ', w / 2, h / 2 + 24); }, true);
-          const plate = new THREE.Mesh(new THREE.BoxGeometry(3.6, 1.8, 0.12), new THREE.MeshLambertMaterial({ map: bt })); plate.position.y = 3; g.add(plate);
+          for (const sx of [-1.4, 1.4]) { const leg = new THREE.Mesh(legGeo, legMat); leg.position.set(sx, 1.5, 0); g.add(leg); }
+          const plate = new THREE.Mesh(plateGeo, boardMat); plate.position.y = 3; g.add(plate);
           group.add(g); boards[p.id] = g;
           if (S.boards[p.id]) g.visible = false;
         }
@@ -211,6 +224,18 @@
     });
     const mk = cap.r; W.owned.push(...cap.owned);
     return mk;
+  }
+
+  // Загрузить в видеокарту все точки мира сразу (иначе они догружались бы по мере поездки и счётчики росли).
+  function preupload(group) {
+    const saved = [];
+    group.traverse((o) => { if (o.isMesh) { saved.push(o); o.frustumCulled = false; } if (o.material) for (const t of ['map', 'emissiveMap']) if (o.material[t]) R.renderer.initTexture(o.material[t]); });
+    const rt = new THREE.WebGLRenderTarget(4, 4), cam = new THREE.PerspectiveCamera();
+    const sc = new THREE.Scene(); sc.add(new THREE.AmbientLight(0xffffff, 1)); const parent = group.parent; sc.add(group);
+    R.renderer.setRenderTarget(rt); R.renderer.render(sc, cam); R.renderer.setRenderTarget(null);
+    if (parent) parent.add(group);
+    for (const o of saved) o.frustumCulled = true;
+    rt.dispose();
   }
 
   // ---------- куски ----------

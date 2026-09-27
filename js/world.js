@@ -392,7 +392,7 @@
     for (let k = 0; k < def.points.boards; k++) {
       const e = edges[Math.floor(prng() * edges.length)];
       const i = e.i0 + 20 + Math.floor(prng() * Math.max(1, e.i1 - e.i0 - 40));
-      const off = e.hw + (k % 4 === 0 ? 30 + prng() * 40 : 4 + prng() * 8);
+      const off = e.hw + (k % 4 === 0 ? 25 + prng() * 30 : 4 + prng() * 8);
       const p = roadside(i, prng() < 0.5 ? -1 : 1, off);
       if (rawHeight(p.x, p.z) < WATER + 0.5) { k--; continue; }
       P.push({ id: 'board-' + (k < 9 ? '0' : '') + (k + 1), type: 'board', name: 'Щит', x: p.x, z: p.z, i, rot: Math.atan2(TX[i], TZ[i]) });
@@ -775,6 +775,8 @@
         const a = this.cars[i], b = this.cars[j];
         if (Math.abs(a.x - b.x) < 6 && Math.abs(a.z - b.z) < 6) collidePair(a, b);
       }
+      // после всех сдвигов (стены, деревья, машины) - снова на землю: не ниже, а на земле - ровно по ней
+      for (const c of this.cars) { const gy = M.groundAt(c.x, c.z, this.g).y; if (!c.air || c.y < gy) c.y = gy; }
       p.nitro = Math.min(1, p.nitro + dt * 0.02);
       if (p.inWater) { this.events.push({ type: 'water' }); this.resetPlayer(); }
       this.points(dt);
@@ -804,7 +806,7 @@
         }
       }
       // зона дрифта: пока ближайшая выборка дороги в диапазоне зоны
-      const q = this.g.q;
+      const q = M.nearestRoad(p.x, p.z);
       let zone = null;
       if (q) for (const pt of M.points) if (pt.type === 'drift' && q.i >= pt.i0 && q.i <= pt.i1) zone = pt;
       if (zone && !this.zone) { this.zone = zone; this.drift = new C.DriftScorer(); this.events.push({ type: 'zoneIn', point: zone }); }
