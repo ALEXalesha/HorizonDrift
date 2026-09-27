@@ -335,7 +335,7 @@
     const speed = Math.hypot(car.vx, car.vz);
     const S = D.SURF[surfName] || D.SURF.asphalt;
     const down = 1 + st.aero * Math.min(1.3, (speed / st.top) * (speed / st.top));
-    const mu = st.grip * surfMu(surfName, st);
+    const mu = st.grip * surfMu(surfName, st) * (car.gripMul || 1);   // gripMul - погода в открытом мире
     const Nf = m * G * CAR_B / WB * down, Nr = m * G * CAR_A / WB * down;
     car.events.length = 0;
 
