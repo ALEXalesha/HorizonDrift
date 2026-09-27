@@ -323,6 +323,7 @@
       }
     }
     inst(W.geo.lampPole, W.mat.prop, {}); inst(W.geo.lampHead, W.mat.lampHead, {}); inst(W.geo.pool, W.mat.pool, {});
+    for (const rs of [false, true]) mesh(W.geo.disc, W.mat.plain, { receiveShadow: rs });
     for (const m of [W.mat.concrete, W.mat.rail, W.mat.tunnel, W.mat.tunnelLight, W.mat.rock]) { mesh(W.geo.box, m); mesh(W.geo.pillar, m); }
     // всё - перед камерой, чтобы прошло отсечение
     const fx = Math.sin(p.h), fz = Math.cos(p.h);
@@ -332,12 +333,15 @@
     W.rain.visible = true; W.beam.visible = true; W.skids.mesh.geometry.setDrawRange(0, 6);
     W.mat.pool.opacity = 0.5; W.mat.beam.opacity = 0.5; W.headlight.intensity = 1;
     W.scene.add(g);
+    // точки мира (щиты, знаки, рампы, фестиваль) грузятся в видеокарту сразу, а не когда впервые попадут в кадр
+    const culled = []; W.markers.group.traverse((o) => { if (o.frustumCulled) { culled.push(o); o.frustumCulled = false; } });
     const cam = R.camera; cam.position.set(p.x - fx * 6, p.y + 3, p.z - fz * 6); cam.lookAt(g.position); cam.near = 0.3; cam.far = 2000; cam.updateProjectionMatrix();
     R.renderer.compile(W.scene, cam);
     const rt = new THREE.WebGLRenderTarget(64, 64);
     R.renderer.setRenderTarget(rt); R.renderer.render(W.scene, cam); R.renderer.setRenderTarget(null);
     rt.dispose();
     W.scene.remove(g);
+    for (const o of culled) o.frustumCulled = true;
     for (const o of made) o.dispose();
     W.rain.visible = vis[0]; W.beam.visible = vis[1]; W.skids.mesh.geometry.setDrawRange(0, W.skids.used * 6);
     W.warmed = true; W.warmPrograms = R.renderer.info.programs.length;
@@ -601,17 +605,17 @@
       }
       const r = W.job.gen.next();
       if (r.done) {
-        const w = W.job.w, old = W.chunks.get(key(w.cx, w.cz)); W.job = null;
+        const w = W.job.w, k = key(w.cx, w.cz), old = W.chunks.get(k); W.job = null;
+        if (!W.want.has(k)) { W.scene.add(r.value.group); disposeChunk(r.value); continue; }   // пока строился, машина уехала
         if (old) disposeChunk(old);
-        W.chunks.set(r.value.key, r.value); W.scene.add(r.value.group); n++; W.built++;
-        if (W.want.has(r.value.key) && W.want.get(r.value.key).lod !== r.value.lod) { /* устарел - перестроится на следующем кадре */ }
+        W.chunks.set(k, r.value); W.scene.add(r.value.group); n++; W.built++;
       }
       const spent = performance.now() - t0;
       if (sync) { if (todo.length && todo[0].d > 1 && spent > 40 && !W.job) break; continue; }
       if (spent > budget) break;
     }
     // незаконченный кусок, который больше не нужен (машина уехала), бросаем
-    if (W.job && !W.want.has(key(W.job.w.cx, W.job.w.cz))) W.job = null;
+    if (W.job && !W.want.has(key(W.job.w.cx, W.job.w.cz))) { W.job.gen.return(); W.job = null; }
     W.pending = todo.length + (W.job ? 1 : 0);
     return n;
   };

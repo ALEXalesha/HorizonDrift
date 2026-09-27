@@ -761,7 +761,7 @@
         if (a.stuckT > 1.5 && !a.reverseT) { a.reverseT = 1.8; a.revSteer = c.inp.steer > 0 ? -1 : 1; }
         if (a.reverseT) {
           a.reverseT = Math.max(0, a.reverseT - dt); a.stuckTotal = (a.stuckTotal || 0) + dt;
-          c.inp.thr = 0; c.inp.brk = 1; c.inp.steer = a.revSteer; c.inp.hb = 0; c.inp.nitro = 0; c.inp.analog = true;
+          c.inp.thr = 0; c.inp.brk = 1; c.inp.steer = a.revSteer || 0; c.inp.hb = 0; c.inp.nitro = 0; c.inp.analog = true;
           if (a.stuckTotal > 5 && c !== this.player && !this.seenByPlayer(c)) this.aiToLane(a);
           return;
         }
