@@ -817,6 +817,18 @@
     }
   });
 
+  // Оболочки ОС (игра в iframe): {mix:'pause'} - как скрытая вкладка: пауза, тишина, ввод сброшен;
+  // {mix:'resume'} - звук возвращается, а паузу снимает сам игрок.
+  window.addEventListener('message', (e) => {
+    const d = e && e.data; if (!d || typeof d !== 'object') return;
+    if (d.mix === 'pause') {
+      G.keys.clear(); clearInput();
+      if (((G.race && G.screen === 'race' && !G.resultShown) || (G.world && G.screen === 'world')) && !G.paused) setPaused(true);
+      if (G.world) saveWorld();
+      A.suspend();
+    } else if (d.mix === 'resume') { A.resume(); G.lastStep = performance.now(); G.acc = 0; }
+  });
+
   // ======================= цикл =======================
   function snapshot(race) { for (const c of race.cars) { c.ix = c.x; c.iz = c.z; c.ih = c.h; } }
   function stepWorld(n, input) {
