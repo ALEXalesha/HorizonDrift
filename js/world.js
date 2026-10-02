@@ -603,7 +603,7 @@
       tree: [[0, 0, 0.38, -1.5, 3.1], [0, 0, 2.6, 2.3, 6.9]],
       pine: [[0, 0, 0.34, -1.5, 2.5], [0, 0, 2.3, 2.0, 9.4]],
       snowpine: [[0, 0, 0.34, -1.5, 2.5], [0, 0, 2.3, 2.0, 8.7]],
-      palm: [[0.36, 0, 0.36, -1.5, 8.3], [0.9, 0, 3.0, 7.4, 9.0]],
+      palm: [[0.1, 0, 0.45, -1.5, 3.2], [0.5, 0, 0.42, 3.0, 8.3], [0.9, 0, 3.0, 7.4, 9.0]],      // ствол клонится: низ и верх отдельно
       cactus: [[0, 0, 0.45, -1.5, 4.1], [0.7, 0, 0.3, 1.5, 3.3], [-0.65, 0, 0.3, 1.2, 2.6], [0.35, 0, 0.42, 1.45, 1.95], [-0.3, 0, 0.38, 1.15, 1.65]],
       rock: [[0.2, 0.1, 2.05, -1.5, 1.8]],
     };
@@ -770,6 +770,19 @@
       }
       return tMin;
     };
+    // Высота опоры штанги камеры над точкой (x, z): не выше want, но ниже низа любого предмета над ней (с запасом rad),
+    // и не ниже low. Так штанга никогда не начинается внутри кроны или перекрытия.
+    M.pivotBelow = function (x, z, want, low, rad) {
+      let y = want;
+      for (const c of M.solidsNear(x, z, rad + 0.5, solidTmp)) {
+        if (c.y1 < low || c.y0 - rad > y) continue;
+        let inside;
+        if (c.t === 'cyl') inside = Math.hypot(x - c.x, z - c.z) < c.r + rad;
+        else { const dx = x - c.x, dz = z - c.z, cs = Math.cos(c.rot), sn = Math.sin(c.rot); inside = Math.abs(dx * cs - dz * sn) < c.w / 2 + rad && Math.abs(dx * sn + dz * cs) < c.d / 2 + rad; }
+        if (inside && c.y0 > low) y = Math.min(y, c.y0 - rad - 0.05);
+      }
+      return Math.max(low, y);
+    };
     // Свободно ли место для машины (кузов с запасом margin): предметы и другие машины.
     M.carFits = function (car, others, margin) {
       const m = margin === undefined ? 0.3 : margin, st = { len: (car.st.len || 4.3) + 2 * m, wid: (car.st.wid || 1.8) + 2 * m, mass: car.st.mass, I: car.st.I };
@@ -844,7 +857,14 @@
   const weatherOf = (name) => (Object.prototype.hasOwnProperty.call(WEATHER, name) ? WEATHER[name] : WEATHER.clear);
 
   // Машина против машины и против твёрдых предметов: кузов - прямоугольник по размерам машины (core.js).
-  function collidePair(a, b) { if (Math.abs(a.y - b.y) > 2.5) return; C.collideCarPair(a, b, 0.3); }
+  // после толчка машины снова проверяются против предметов: другая машина не вдавливает кузов в стену
+  function collidePair(a, b) {
+    if (Math.abs(a.y - b.y) > 2.5) return;
+    const ax = a.x, az = a.z, bx = b.x, bz = b.z;
+    C.collideCarPair(a, b, 0.3);
+    if (a.x !== ax || a.z !== az) a.pushed = true;
+    if (b.x !== bx || b.z !== bz) b.pushed = true;
+  }
   const CAR_H = 1.5;                               // высота кузова для столкновений с предметами
   const hitTmp = {};
   // Все предметы списка у машины: вытолкнуть по кратчайшей оси, погасить скорость. true - было касание.
@@ -1180,6 +1200,7 @@
         const a = this.cars[i], b = this.cars[j];
         if (Math.abs(a.x - b.x) < 6 && Math.abs(a.z - b.z) < 6) collidePair(a, b);
       }
+      for (const c of this.cars) if (c.pushed) { c.pushed = false; if (c.solidCache && c.solidCache.list.length) collideSolids(c, c.solidCache.list); }
       // после всех сдвигов (стены, деревья, машины) - снова на землю: не ниже, а на земле - ровно по ней
       for (const c of this.cars) { const gy = M.groundAt(c.x, c.z, this.g, c.y).y; if (!c.air || c.y < gy) c.y = gy; }
       p.nitro = Math.min(1, p.nitro + dt * 0.02);

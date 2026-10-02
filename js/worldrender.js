@@ -461,12 +461,13 @@
       }
       // мост: ограждения и опоры; тоннель: стены, свод, свет, гора сверху и порталы
       if (lod < 2) {
-        const bridge = list.filter((i) => M.FL[i] & 1), tunnel = list.filter((i) => M.FL[i] & 2);
-        if (bridge.length > 1) {
+        // мосты и тоннели - отдельными кусками подряд идущих точек: иначе полоса перемычкой соединяла бы два разных моста
+        const pieces = (bit) => { const out = []; let cur = []; for (const i of list) { if (M.FL[i] & bit) { if (cur.length && i - cur[cur.length - 1] > step) { out.push(cur); cur = []; } cur.push(i); } else if (cur.length) { out.push(cur); cur = []; } } if (cur.length) out.push(cur); return out.filter((p) => p.length > 1); };
+        for (const bridge of pieces(1)) {
           for (const sd of [-1, 1]) ghost(add(stripGeom(M, bridge, sd * (hw + 0.2), 0.05, 1.1, 'wall'), W.mat.rail), 'wall');   // ограждение: стенка дороги в физике
           ghost(add(stripGeom(M, bridge, -hw - 0.3, -1.4, hw + 0.3, 'slab'), W.mat.concrete), 'ground');
         }
-        if (tunnel.length > 1) {
+        for (const tunnel of pieces(2)) {
           for (const sd of [-1, 1]) ghost(add(stripGeom(M, tunnel, sd * (hw + 1), 0, 7, 'wall'), W.mat.tunnel), 'wall');
           ghost(add(stripGeom(M, tunnel, -hw - 1.2, 7, hw + 1.2, 'slab'), W.mat.tunnel), 'overhead');
           ghost(add(stripGeom(M, tunnel, -hw - 1.1, 0.0, hw + 1.1, 'slab'), W.mat.tunnel), 'ground');          // пол тоннеля от стены до стены
@@ -778,15 +779,18 @@
       // пружинная штанга: от крыши машины к месту камеры; что встало между (дом, шатёр, склон, свод тоннеля) - камера ближе
       // если штанга упирается близко (стена сбоку при облёте) - камера поднимается выше по стене, чтобы видеть машину, а не крышу
       let cx = st.x, cy = st.y, cz = st.z;
-      const blen = Math.hypot(cx - px, cy - py - 2.1, cz - pz), free = W.M.sweep(px, py + 2.1, pz, cx, cy, cz, CAM_R, p.y) * blen;
+      // опора штанги - над крышей, но ниже кроны дерева (шатра, перекрытия) над машиной: иначе штанга начинается внутри
+      // кроны, кроне «прощается», и камера оказывается в ней
+      const pivY = W.M.pivotBelow(px, pz, py + 2.1, py + 1.0, CAM_R);
+      const blen = Math.hypot(cx - px, cy - pivY, cz - pz), free = W.M.sweep(px, pivY, pz, cx, cy, cz, CAM_R, p.y) * blen;
       if (free < 3.2 && blen > 3.2) {
         const hx = (cx - px), hz = (cz - pz), hl = Math.hypot(hx, hz) || 1;
         for (const el of [0.75, 1.1, 1.35]) {
-          const ux = px + hx / hl * Math.cos(el) * blen, uy = py + 2.1 + Math.sin(el) * blen, uz = pz + hz / hl * Math.cos(el) * blen;
-          if (W.M.sweep(px, py + 2.1, pz, ux, uy, uz, CAM_R, p.y) * blen > Math.max(free + 1, 3.2)) { cx = ux; cy = uy; cz = uz; break; }
+          const ux = px + hx / hl * Math.cos(el) * blen, uy = pivY + Math.sin(el) * blen, uz = pz + hz / hl * Math.cos(el) * blen;
+          if (W.M.sweep(px, pivY, pz, ux, uy, uz, CAM_R, p.y) * blen > Math.max(free + 1, 3.2)) { cx = ux; cy = uy; cz = uz; break; }
         }
       }
-      armTo(cam, px, py + 2.1, pz, cx, cy, cz, p.y, st, false);      // опора над крышей: короткая штанга смотрит на машину сверху, а не в крышу
+      armTo(cam, px, pivY, pz, cx, cy, cz, p.y, st, false);      // опора над крышей: короткая штанга смотрит на машину сверху, а не в крышу
       if (ob.free) tmpV.set(px, py + 1.1, pz); else tmpV.set(px + fx * 3, py + 1.1, pz + fz * 3);
       cam.lookAt(tmpV);
     }
