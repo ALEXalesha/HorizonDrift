@@ -1301,7 +1301,8 @@
       else if (look.drag) { lookBy(e.clientX - look.lx, e.clientY - look.ly); look.lx = e.clientX; look.ly = e.clientY; }
     });
     window.addEventListener('wheel', (e) => {
-      if (G.overlay === 'photo' || !(G.screen === 'race' || G.screen === 'world')) return;
+      // колесо меняет дальность облёта - только у камер снаружи; в салоне и с капота оно ничего не трогает
+      if (G.overlay === 'photo' || !(G.screen === 'race' || G.screen === 'world') || G.camMode === 'cockpit' || G.camMode === 'hood') return;
       R.view.zoom = Math.max(R.VIEW.zoomMin, Math.min(R.VIEW.zoomMax, R.view.zoom * (e.deltaY > 0 ? 1.1 : 0.9))); look.idle = 0;
     }, { passive: true });
   })();
