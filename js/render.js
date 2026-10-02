@@ -1071,7 +1071,8 @@
       const back = far2 ? 9.5 : 6.2, up = far2 ? 3.6 : 2.3;
       // смотрим немного по вектору скорости, чтобы занос был виден
       let dx = fx, dz = fz;
-      if (sp > 4) { const vl = Math.hypot(vx, vz); dx = fx * 0.6 + vx / vl * 0.4; dz = fz * 0.6 + vz / vl * 0.4; const l = Math.hypot(dx, dz); dx /= l; dz /= l; }
+      const vl = Math.hypot(vx, vz);
+      if (sp > 4 && vl > 1) { dx = fx * 0.6 + vx / vl * 0.4; dz = fz * 0.6 + vz / vl * 0.4; const l = Math.hypot(dx, dz); dx /= l; dz /= l; }
       const ob = R.orbitOffset(dx, dz, back, up, V, orbTmp);
       const tx = px + ob.x, tz = pz + ob.z, ty = py + ob.y;
       if (!st.init || Math.hypot(tx - st.x, tz - st.z) > 25) { st.x = tx; st.y = ty; st.z = tz; st.init = true; }   // скачок (возврат на трассу) - без долгого догона

@@ -219,8 +219,8 @@
     };
 
     // Картинка для зеркал: вид назад с крыши, раз в три кадра, маленькая.
-    CK.mirrors = function (renderer, scene, carRoot) {
-      if (!CK.group || (CK.frameN % 4) !== 0) return;
+    CK.mirrors = function (renderer, scene, carRoot, force) {
+      if (!CK.group || (!force && (CK.frameN % 4) !== 0)) return;
       const c = CK.cab; carRoot.updateMatrixWorld(true);
       tv.set(0, c.yFT + 0.15, c.zFT - 0.2).applyMatrix4(carRoot.matrixWorld); mirrorCam.position.copy(tv);
       carRoot.getWorldQuaternion(mirrorCam.quaternion);                      // камера смотрит по -z, нос машины +z: назад

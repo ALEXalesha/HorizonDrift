@@ -316,7 +316,9 @@
 
   // ---------- прогрев: все виды кусков, декора и материалов рисуются один раз при входе ----------
   // Шейдеры (и для теней тоже) собираются здесь, а не посреди езды, когда кусок впервые попал в кадр.
+  const __carIds = () => C.carDef ? (window.DriftData || {}).CARS.map((c) => c.id) : ['iskra'];
   function warmUp() {
+    const rt2 = new THREE.WebGLRenderTarget(64, 64);
     const g = new THREE.Group(), made = [], M = W.M, p = W.world.player;
     const mesh = (geo, mat, o) => { const m = new THREE.Mesh(geo, mat); Object.assign(m, o || {}); g.add(m); return m; };
     const inst = (geo, mat, o) => {
@@ -356,6 +358,16 @@
     for (const o of culled) o.frustumCulled = true;
     for (const o of made) o.dispose();
     W.rain.visible = vis[0]; W.beam.visible = vis[1]; W.skids.mesh.geometry.setDrawRange(0, W.skids.used * 6);
+    // машины трафика (без тени, как в syncCars) и салон собираются здесь же; одна машина трафика остаётся жить,
+    // чтобы её программы не освобождались, когда последняя машина трафика уезжает (иначе - пересборка и рывок)
+    if (!W.keepCar) {
+      const ids = __carIds(), cp = R._.capture(() => R._.buildCar(ids[ids.length - 1], C.defaultLook(ids[ids.length - 1]), { own: true }));
+      W.keepCar = cp.r; W.keepCar.owned = cp.owned; W.keepCar.root.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.frustumCulled = false; } });
+    }
+    W.keepCar.root.position.set(p.x + Math.sin(p.h) * 9, p.y, p.z + Math.cos(p.h) * 9); W.scene.add(W.keepCar.root);
+    R.renderer.setRenderTarget(rt2); R.renderer.render(W.scene, cam);
+    if (R.cockpit) { R.cockpit.ensure(p.carId); R.cockpit.update(0, { car: p, steerN: 0, kmh: 0, vmax: 200, rpm: 900, gear: 1, nitro: 1, dark: 1, light: 0.5, rain: true, units: 'kmh' }); R.cockpit.place(cam, W.carMeshes.get(p).root, { yaw: 0, pitch: 0 }, 72); R.cockpit.render(R.renderer); R.cockpit.mirrors(R.renderer, W.scene, W.carMeshes.get(p).root, true); R.cockpit.off(); }
+    R.renderer.setRenderTarget(null); rt2.dispose(); W.scene.remove(W.keepCar.root);
     W.warmed = true; W.warmPrograms = R.renderer.info.programs.length;
   }
 
@@ -755,11 +767,13 @@
     } else {
       const far2 = camMode === 'far', back = far2 ? 9.5 : 6.2, up = far2 ? 3.6 : 2.3;
       let dx = fx, dz = fz; const sp = p.speed;
-      if (sp > 4) { const vl = Math.hypot(p.vx, p.vz); dx = fx * 0.6 + p.vx / vl * 0.4; dz = fz * 0.6 + p.vz / vl * 0.4; const l = Math.hypot(dx, dz); dx /= l; dz /= l; }
+      const vl = Math.hypot(p.vx, p.vz);
+      if (sp > 4 && vl > 1) { dx = fx * 0.6 + p.vx / vl * 0.4; dz = fz * 0.6 + p.vz / vl * 0.4; const l = Math.hypot(dx, dz); dx /= l; dz /= l; }
       const ob = R.orbitOffset(dx, dz, back, up, R.view, orbTmp);
       const tx = px + ob.x, tz = pz + ob.z;
       let ty = py + ob.y; const gy = W.M.groundAt(tx, tz, gq, py).y; if (ty < gy + 1.2) ty = gy + 1.2;
-      if (!st.init || Math.hypot(tx - st.x, tz - st.z) > 25) { st.x = tx; st.y = ty; st.z = tz; st.init = true; st.armInit = false; }
+      // скачок (перемещение, возврат на дорогу) или испорченное состояние (не число) - камера сразу на место
+      if (!st.init || !(Math.hypot(tx - st.x, tz - st.z, ty - st.y) <= 25)) { st.x = tx; st.y = ty; st.z = tz; st.init = true; st.armInit = false; }
       const kk = 1 - Math.exp(-dt * 7); st.x += (tx - st.x) * kk; st.y += (ty - st.y) * kk; st.z += (tz - st.z) * kk;
       // пружинная штанга: от крыши машины к месту камеры; что встало между (дом, шатёр, склон, свод тоннеля) - камера ближе
       // если штанга упирается близко (стена сбоку при облёте) - камера поднимается выше по стене, чтобы видеть машину, а не крышу
@@ -824,6 +838,7 @@
       if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => { if (m.map) m.map.dispose(); if (m.emissiveMap) m.emissiveMap.dispose(); m.dispose(); });
     });
     for (const o of W.owned) if (o && o.dispose) o.dispose();
+    if (W.keepCar) { R._.disposeCar(W.keepCar); for (const o of W.keepCar.owned) if (o.dispose) o.dispose(); W.keepCar = null; }
     for (const g of shared) g.dispose();
     W.sun.dispose(); W.headlight.dispose();
     W.scene = null; W.world = null; W.owned = []; W.warmed = false;

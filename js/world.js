@@ -891,7 +891,7 @@
       if (!q) { let best = 1e18; for (let k = 0; k < M.N; k += 5) { const d = (M.X[k] - x) ** 2 + (M.Z[k] - z) ** 2; if (d < best) { best = d; i = k; } } } else i = q.i;
       let h = Math.atan2(M.TX[i], M.TZ[i]);
       if (heading !== undefined && Math.cos(heading - h) < 0) h += Math.PI;
-      c.vx = c.vz = c.w = 0; c.steer = 0; c.gear = 1; c.vy = 0; c.air = false;
+      c.vx = c.vz = c.w = 0; c.steer = 0; c.gear = 1; c.vy = 0; c.air = false; c.speed = 0; c.vLong = 0;     // скорость - тоже: камера смотрит по ней
       const spot = this.freeSpot(c, i, h);
       c.x = spot.x; c.z = spot.z; c.h = spot.h; c.y = spot.y; c.prevX = c.x; c.prevZ = c.z; c.solidCache = null;
       this.events.push({ type: 'placed' });

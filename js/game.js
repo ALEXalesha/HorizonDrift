@@ -1172,7 +1172,8 @@
   function worldTravel(id) {
     const ok = G.world.fastTravel(id);
     if (!ok) return false;
-    WR.stream(true); WR.cam.init = false; closeOverlay(); saveWorld();
+    // как переключение камеры: взгляд вперёд, штанга и сглаживание - заново от нового места
+    WR.stream(true); WR.cam.init = false; WR.cam.armInit = false; resetView(); closeOverlay(); saveWorld();
     const pt = G.world.M.pointById(id); showMsg('Быстрое перемещение', pt.name, 1400);
     return true;
   }
