@@ -14,7 +14,7 @@
     };
     const amb = new THREE.AmbientLight(0xffffff, 0.55), sun = new THREE.DirectionalLight(0xffffff, 0.8);
     sun.position.set(0.4, 1, 0.3); CK.scene.add(amb); CK.scene.add(sun);
-    const tq = new THREE.Quaternion(), te = new THREE.Euler(0, 0, 0, 'YXZ'), tv = new THREE.Vector3(), tv2 = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+    const tq = new THREE.Quaternion(), te = new THREE.Euler(0, 0, 0, 'YXZ'), tv = new THREE.Vector3(), tv2 = new THREE.Vector3(), tv3 = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
 
     // ---- зеркала: одна маленькая картинка вида назад, у каждого зеркала - своя часть ----
     const mirrorRT = new THREE.WebGLRenderTarget(320, 112);
@@ -101,7 +101,14 @@
       CK.eye = { x: ex, y: ey, z: ez };
       CK.cab = { zFB, yFB, zFT, yFT, zRT, yRT, zRB, yRB, W, L };
       // панель: от стекла к водителю, верх - по кромке стекла
-      box(W - 0.16, 0.3, 0.62, dash, 0, yFB - 0.15, zFB - 0.31);
+      box(W - 0.08, 0.3, 0.62, dash, 0, yFB - 0.15, zFB - 0.31);
+      // низ панели до пола, моторный щит, пол и пороги: сквозь салон дорогу не видно
+      const floorY = 0.3, lowTop = yFB - 0.3;
+      box(W - 0.08, Math.max(0.05, lowTop - floorY), 0.08, dash, 0, (lowTop + floorY) / 2, zFB - 0.06);                   // моторный щит
+      box(W - 0.08, Math.max(0.05, lowTop - floorY - 0.18), 0.3, dash, 0, (lowTop + floorY + 0.18) / 2, zFB - 0.5);    // нижняя панель над ногами
+      box(W - 0.08, 0.04, Math.max(0.6, zFB - zRB + 0.2), black, 0, floorY, (zFB + zRB) / 2);                             // пол
+      box(W - 0.08, 0.26, 0.5, black, 0, floorY + 0.13, zFB - 0.3);                                                        // ниша для ног
+      for (const sd of [1, -1]) box(0.1, 0.2, Math.max(0.6, zFB - zRB), trim, sd * (W / 2 - 0.08), floorY + 0.1, (zFB + zRB) / 2);   // пороги
       box(W - 0.2, 0.05, 0.12, black, 0, yFB + 0.005, zFB - 0.02);                // кромка у стекла
       // щиток приборов с козырьком
       const gz = zFB - 0.6, gy = yFB + 0.0;
@@ -122,9 +129,11 @@
       box(0.06, 0.06, 0.36, black, wc.x, wc.y - 0.07, wc.z + 0.16).rotation.x = -0.42;
       CK.gloves = [];
       for (const sd of [1, -1]) {
-        const gl = new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 8), glove); gl.position.set(sd * 0.16, 0.093, -0.01); wheel.add(gl);       // руки на 10 и 2 часах
-        const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 1, 8), sleeve); g.add(arm);
-        CK.gloves.push({ gl, arm, shoulder: new THREE.Vector3(ex + sd * 0.21, ey - 0.38, ez - 0.05) });
+        const gl = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.09, 0.05), glove); gl.position.set(sd * 0.16, 0.093, -0.012); gl.rotation.z = -sd * 0.5; wheel.add(gl);   // кисти на 10 и 2 часах
+        const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.037, 1, 8), sleeve); g.add(arm);            // предплечье
+        CK.armRadius = Math.max(arm.geometry.parameters.radiusTop, arm.geometry.parameters.radiusBottom);
+        const upper = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.045, 1, 8), sleeve); g.add(upper);       // плечо
+        CK.gloves.push({ gl, arm, upper, elbow: new THREE.Vector3(ex + sd * 0.29, ey - 0.43, ez + 0.2), shoulder: new THREE.Vector3(ex + sd * 0.21, ey - 0.22, ez - 0.16) });
       }
       // стойки стекла, верхняя кромка, потолок
       for (const sd of [1, -1]) beam([sd * (W / 2 - 0.12), yFB, zFB], [sd * (W / 2 - 0.2), yFT, zFT], 0.08, pillar);
@@ -176,11 +185,8 @@
       const a = -(s.steerN || 0) * 2.4;                             // полный руль - около 140 градусов
       CK.wheel.rotation.z = a; CK.state.wheelAngle = -a;
       CK.group.updateMatrixWorld(true);
-      for (const h of CK.gloves) {
-        h.gl.getWorldPosition(tv); tv2.copy(h.shoulder);
-        const len = tv.distanceTo(tv2); h.arm.scale.set(1, len, 1); h.arm.position.copy(tv).add(tv2).multiplyScalar(0.5);
-        h.arm.quaternion.setFromUnitVectors(up, tv2.sub(tv).normalize());
-      }
+      const seg = (m, a, b) => { const len = a.distanceTo(b); m.scale.set(1, len, 1); m.position.copy(a).add(b).multiplyScalar(0.5); m.quaternion.setFromUnitVectors(up, tv3.copy(b).sub(a).normalize()); };
+      for (const h of CK.gloves) { h.gl.getWorldPosition(tv); seg(h.arm, tv, h.elbow); seg(h.upper, h.elbow, h.shoulder); }
       const night = s.dark > 0.35, accent = D.BODY[CK.shape].accent;
       CK.frameN++;
       if (CK.frameN % 2 === 0 || !CK.state.shown) drawGauges(s, accent, night);
@@ -208,7 +214,7 @@
       // голова поворачивается и чуть смещается к центру салона, когда смотришь назад, - остаётся внутри
       const lean = Math.min(1, Math.abs(yaw) / 2.6);
       const lx = e.x + sw.x - lean * 0.18 * Math.sign(e.x), ly = e.y + lean * 0.03, lz = e.z + sw.z + lean * 0.05;
-      te.set(pitch - 0.07, Math.PI + yaw, sw.roll, 'YXZ'); tq.setFromEuler(te);     // взгляд чуть вниз: видно руль и приборы
+      te.set(pitch, Math.PI + yaw, sw.roll, 'YXZ'); tq.setFromEuler(te);            // по умолчанию - прямо вперёд поверх панели
       CK.cam.position.set(lx, ly, lz); CK.cam.quaternion.copy(tq);
       CK.cam.fov = fov; CK.cam.aspect = cam.aspect; CK.cam.updateProjectionMatrix();
       carRoot.updateMatrixWorld(true);
@@ -236,6 +242,21 @@
       if (!CK.group) return;
       const ac = renderer.autoClear; renderer.autoClear = false; renderer.clearDepth();
       renderer.render(CK.scene, CK.cam); renderer.autoClear = ac;
+    };
+    // Проверка «салон без дыр»: салон рисуется один, без мира, на пурпурном фоне; ниже линии панели пурпура быть не должно
+    // (иначе там видна дорога сквозь пол, панель или нишу для ног). Линия панели - верхняя кромка панели перед водителем.
+    const covRT = new THREE.WebGLRenderTarget(320, 180), covClear = new THREE.Color(1, 0, 1);
+    CK.coverage = function (renderer) {
+      if (!CK.group) return null;
+      const c = CK.cab, line = new THREE.Vector3(CK.eye.x, c.yFB, c.zFB - 0.62).project(CK.cam), lineY = (1 - (line.y + 1) / 2);   // доля высоты сверху
+      const oc = renderer.getClearColor(new THREE.Color()), oa = renderer.getClearAlpha();
+      renderer.setRenderTarget(covRT); renderer.setClearColor(covClear, 1); renderer.clear(); renderer.render(CK.scene, CK.cam);
+      const buf = new Uint8Array(320 * 180 * 4); renderer.readRenderTargetPixels(covRT, 0, 0, 320, 180, buf);
+      renderer.setRenderTarget(null); renderer.setClearColor(oc, oa);
+      let holes = 0, n = 0; const y0 = Math.min(179, Math.max(0, Math.ceil(lineY * 180) + 2));
+      // по ширине - середина кадра (22-78%): по краям ниже панели честно видна дорога сквозь боковые стёкла
+      for (let row = y0; row < 180; row++) { const gy = 179 - row; for (let x = 70; x < 250; x++) { const k = (gy * 320 + x) * 4; n++; if (buf[k] > 200 && buf[k + 1] < 40 && buf[k + 2] > 200) holes++; } }
+      return { lineY, holes: n ? holes / n : 0, rows: 180 - y0 };
     };
     CK.off = function () { CK.state.active = false; };
     CK.dispose = function () { clear(); mirrorRT.dispose(); gtex.dispose(); dropTex.dispose(); };
