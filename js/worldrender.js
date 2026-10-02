@@ -94,7 +94,7 @@
       const plain = _.canvasTex(256, 256, (g, w) => { g.fillStyle = '#2d2e32'; g.fillRect(0, 0, w, w); _.speckle(g, w, w, _.rngOf(21), 3000, ['#232428', '#393a3f', '#2a2b2f', '#44454a'], 1, 2.5); }, true);
       m.plain = new THREE.MeshLambertMaterial({ map: plain, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
       m.sidewalk = new THREE.MeshLambertMaterial({ color: 0xa9abb2, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
-      m.concrete = new THREE.MeshLambertMaterial({ color: 0x9a9ca2 });
+      m.concrete = new THREE.MeshLambertMaterial({ color: 0x9a9ca2, side: THREE.DoubleSide });       // плита моста видна и снизу
       m.rail = new THREE.MeshLambertMaterial({ map: _.wallTex('rail'), side: THREE.DoubleSide });
       m.tunnel = new THREE.MeshLambertMaterial({ color: 0x5a5c63, side: THREE.DoubleSide });
       m.tunnelLight = new THREE.MeshBasicMaterial({ color: 0xffe6a8 });
@@ -154,9 +154,10 @@
     W.beam = beamMesh(); scene.add(W.beam);
     // осадки, частицы, следы
     W.rain = rainSystem(); scene.add(W.rain);
+    ghost(W.sky, 'sky'); ghost(W.water, 'water'); ghost(W.far, 'ground'); ghost(W.beam, 'light'); ghost(W.rain, 'light');
     const pc = R._.capture(() => ({ snow: R._.particleSystem(900), parts: R._.particleSystem({ low: 300, medium: 700, high: 1400 }[settings.particles] || 700), skids: R._.skidSystem(1600) }));
     W.snowP = pc.r.snow; W.parts = pc.r.parts; W.skids = pc.r.skids; W.owned.push(...pc.owned);
-    scene.add(W.snowP.pts); scene.add(W.parts.pts); scene.add(W.skids.mesh);
+    scene.add(W.snowP.pts); scene.add(W.parts.pts); scene.add(W.skids.mesh); ghost(W.skids.mesh, 'flat');
     // точки мира
     W.markers = buildMarkers(M, world);
     scene.add(W.markers.group);
@@ -244,42 +245,51 @@
       const S = world.save;
       const sign = (text, color, x, y, z, s) => {
         const m = new THREE.Mesh(new THREE.PlaneGeometry(8 * (s || 1), 2 * (s || 1)), new THREE.MeshBasicMaterial({ map: labelTex(text, color), side: THREE.DoubleSide, transparent: true, fog: false }));
-        m.position.set(x, y, z); group.add(m); anim.push({ m, bill: true }); return m;
+        m.position.set(x, y, z); ghost(m, 'overhead'); group.add(m); anim.push({ m, bill: true }); return m;
       };
       for (const p of M.points) {
         const y = M.groundAt(p.x, p.z).y;
         if (p.type === 'fest') {
-          // площадка развёрнута к дороге: сцена, экран лицом к подъезду, шатры вокруг
-          const fg = new THREE.Group(), toRoad = Math.atan2(M.X[p.i] - p.x, M.Z[p.i] - p.z);
-          fg.position.set(p.x, y, p.z); fg.rotation.y = toRoad; group.add(fg); W.festGroup = fg;
+          // площадка, подъезд, сцена, экран, шатры - по данным мира (M.fest, M.FEST_PARTS); там же их твёрдые коробки
+          const Fs = M.fest, fg = new THREE.Group(), base = 0.15;
+          fg.position.set(Fs.x, Fs.y, Fs.z); fg.rotation.y = Fs.rot; group.add(fg); W.festGroup = fg;
           const mat = new THREE.MeshLambertMaterial({ color: 0xff5a1f }), mat2 = new THREE.MeshLambertMaterial({ color: 0x2a2c33 }), white = new THREE.MeshLambertMaterial({ color: 0xf4f4f4 });
-          const pad = new THREE.Mesh(new THREE.CylinderGeometry(40, 40, 0.5, 40), new THREE.MeshLambertMaterial({ color: 0x6f7178 })); pad.position.y = -0.1; fg.add(pad);
-          const stage = new THREE.Mesh(new THREE.BoxGeometry(26, 1.2, 14), mat2); stage.position.set(0, 0.6, -12); fg.add(stage);
-          const scr = new THREE.Mesh(new THREE.PlaneGeometry(22, 5.5), new THREE.MeshBasicMaterial({ map: labelTex('HORIZON DRIFT · ФЕСТИВАЛЬ', '#ff5a1f', true) }));
-          scr.position.set(0, 7.5, -17.8); fg.add(scr); W.festScreen = scr;
-          const back = new THREE.Mesh(new THREE.PlaneGeometry(22, 5.5), mat2); back.rotation.y = Math.PI; back.position.set(0, 7.5, -17.9); fg.add(back);
-          for (const sx of [-11.5, 11.5]) { const post = new THREE.Mesh(new THREE.BoxGeometry(0.5, 10.5, 0.5), mat2); post.position.set(sx, 5.2, -17.9); fg.add(post); }
-          for (let k = 0; k < 8; k++) {
-            const a = (k / 7 - 0.5) * Math.PI * 1.2 + Math.PI, tx = Math.sin(a) * 30, tz = Math.cos(a) * 30;
-            const tent = new THREE.Mesh(new THREE.ConeGeometry(4.5, 5, 6), k % 2 ? mat : white); tent.position.set(tx, 2.5, tz); fg.add(tent);
-            const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 12, 5), mat2); pole.position.set(tx, 6, tz); fg.add(pole);
-            const flag = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.4), new THREE.MeshBasicMaterial({ color: [0xff5a1f, 0x19d3ff, 0xffb02e, 0x9a4dff][k % 4], side: THREE.DoubleSide }));
-            flag.position.set(tx + 1.2, 11.2, tz); fg.add(flag); anim.push({ m: flag, flag: true, k });
+          const padMat = new THREE.MeshLambertMaterial({ color: 0x6f7178 });
+          const pad = ghost(new THREE.Mesh(new THREE.CylinderGeometry(Fs.r, Fs.r, 0.5, 40), padMat), 'ground'); pad.position.y = base - 0.25; fg.add(pad);
+          // подъезд от дороги: полоса по тем же высотам, что у физики
+          const D = Fs.drive, dg = new THREE.BufferGeometry(), dp = [], di = [], ux = D.bx - D.ax, uz = D.bz - D.az, L = Math.hypot(ux, uz), nx = -uz / L, nz = ux / L, nseg = 12;
+          for (let k = 0; k <= nseg; k++) { const t = k / nseg, x = D.ax + ux * t, z = D.az + uz * t, yy = D.ay + (D.by - D.ay) * t + 0.12; dp.push(x + nx * D.w / 2, yy, z + nz * D.w / 2, x - nx * D.w / 2, yy, z - nz * D.w / 2); if (k) { const q = (k - 1) * 2; di.push(q, q + 1, q + 2, q + 1, q + 3, q + 2); } }
+          dg.setAttribute('position', new THREE.Float32BufferAttribute(dp, 3)); dg.setIndex(di); dg.computeVertexNormals();
+          group.add(ghost(new THREE.Mesh(dg, new THREE.MeshLambertMaterial({ color: 0x55575d, side: THREE.DoubleSide })), 'ground'));
+          for (const q of M.FEST_PARTS) {
+            const h = q.y1 - q.y0, cy = base + (q.y0 + q.y1) / 2;
+            if (q.part === 'stage') { const m = solid(new THREE.Mesh(new THREE.BoxGeometry(q.w, h, q.d), mat2), 'fest-stage'); m.position.set(q.x, cy, q.z); fg.add(m); }
+            else if (q.part === 'post') { const m = solid(new THREE.Mesh(new THREE.BoxGeometry(q.w, h, q.d), mat2), 'fest-post'); m.position.set(q.x, cy, q.z); fg.add(m); }
+            else if (q.part === 'screen') {
+              const scr = solid(new THREE.Mesh(new THREE.PlaneGeometry(q.w, h), new THREE.MeshBasicMaterial({ map: labelTex('HORIZON DRIFT · ФЕСТИВАЛЬ', '#ff5a1f', true) })), 'fest-screen');
+              scr.position.set(q.x, cy, q.z + 0.05); fg.add(scr); W.festScreen = scr;
+              const back = solid(new THREE.Mesh(new THREE.PlaneGeometry(q.w, h), mat2), 'fest-screen'); back.rotation.y = Math.PI; back.position.set(q.x, cy, q.z - 0.05); fg.add(back);
+            } else if (q.part === 'tent') {
+              const tent = solid(new THREE.Mesh(new THREE.ConeGeometry(q.r, h, 6), q.k % 2 ? mat : white), 'fest-tent'); tent.position.set(q.x, cy, q.z); fg.add(tent);
+              const pole = solid(new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 12, 5), mat2), 'fest-tent'); pole.position.set(q.x, base + 6, q.z); fg.add(pole);
+              const flag = ghost(new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.4), new THREE.MeshBasicMaterial({ color: [0xff5a1f, 0x19d3ff, 0xffb02e, 0x9a4dff][q.k % 4], side: THREE.DoubleSide })), 'overhead');
+              flag.position.set(q.x + 1.2, base + 11.2, q.z); fg.add(flag); anim.push({ m: flag, flag: true, k: q.k });
+            }
           }
-          sign('ФЕСТИВАЛЬ', '#ff5a1f', p.x, y + 15, p.z, 1.3);
+          sign('ФЕСТИВАЛЬ', '#ff5a1f', Fs.x, Fs.y + 15, Fs.z, 1.3);
         } else if (p.type === 'event') {
-          const ring = new THREE.Mesh(new THREE.TorusGeometry(9, 0.35, 8, 40), new THREE.MeshBasicMaterial({ color: 0xff8a1f })); ring.rotation.x = Math.PI / 2; ring.position.set(p.x, y + 0.3, p.z); group.add(ring);
+          const ring = new THREE.Mesh(new THREE.TorusGeometry(9, 0.35, 8, 40), new THREE.MeshBasicMaterial({ color: 0xff8a1f })); ring.rotation.x = Math.PI / 2; ring.position.set(p.x, y + 0.3, p.z); group.add(ghost(ring, 'flat'));
           const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 40, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0xff8a1f, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false, fog: false }));
-          beam.position.set(p.x, y + 20, p.z); group.add(beam); anim.push({ m: beam, pulse: true });
+          beam.position.set(p.x, y + 20, p.z); group.add(ghost(beam, 'light')); anim.push({ m: beam, pulse: true });
           sign('СОБЫТИЯ · ' + p.name.toUpperCase(), '#ff8a1f', p.x, y + 8, p.z);
         } else if (p.type === 'radar') {
-          const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.15, 6, 6), new THREE.MeshLambertMaterial({ color: 0x3a3d44 })); pole.position.set(p.x, y + 3, p.z); group.add(pole);
-          const cam = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.6, 1.2), new THREE.MeshLambertMaterial({ color: 0xffb02e })); cam.position.set(p.x, y + 6.2, p.z); group.add(cam);
+          const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.15, 6, 6), new THREE.MeshLambertMaterial({ color: 0x3a3d44 })); pole.position.set(p.x, y + 3, p.z); group.add(solid(pole, 'radar'));
+          const cam = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.6, 1.2), new THREE.MeshLambertMaterial({ color: 0xffb02e })); cam.position.set(p.x, y + 6.2, p.z); group.add(ghost(cam, 'overhead'));
           sign('РАДАР', '#19d3ff', p.x, y + 8.5, p.z, 0.6);
         } else if (p.type === 'drift') {
           for (const i of [p.i0, p.i1]) {
             const e = M.edges[M.E[i]], h = Math.atan2(M.TX[i], M.TZ[i]);
-            const arch = new THREE.Mesh(new THREE.TorusGeometry(e.hw + 1, 0.3, 8, 24, Math.PI), new THREE.MeshBasicMaterial({ color: 0xff5ad8 })); arch.position.set(M.X[i], M.Y[i], M.Z[i]); arch.rotation.y = h; group.add(arch);
+            const arch = new THREE.Mesh(new THREE.TorusGeometry(e.hw + 1, 0.3, 8, 24, Math.PI), new THREE.MeshBasicMaterial({ color: 0xff5ad8 })); arch.position.set(M.X[i], M.Y[i], M.Z[i]); arch.rotation.y = h; group.add(solid(arch, 'arch'));
           }
           sign('ЗОНА ДРИФТА', '#ff5ad8', M.X[p.i0], M.Y[p.i0] + 9, M.Z[p.i0], 0.8);
         } else if (p.type === 'jump') {
@@ -287,12 +297,13 @@
           shape.moveTo(0, 0); shape.lineTo(rp.len, 0); shape.lineTo(rp.len, rp.h); shape.lineTo(0, 0);
           const g = new THREE.ExtrudeGeometry(shape, { depth: rp.w, bevelEnabled: false }); g.translate(0, 0, -rp.w / 2); g.rotateY(-Math.PI / 2);
           const tex = R._.canvasTex(64, 64, (c, w) => { for (let k = 0; k < 8; k++) { c.fillStyle = k % 2 ? '#ffb02e' : '#1b1b1d'; c.fillRect(0, k * 8, w, 8); } }, true);
-          const ramp = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ map: tex })); ramp.position.set(rp.x, rp.y0, rp.z); ramp.rotation.y = Math.atan2(rp.tx, rp.tz); group.add(ramp);
+          const ramp = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ map: tex })); ramp.position.set(rp.x, rp.y0, rp.z); ramp.rotation.y = Math.atan2(rp.tx, rp.tz); group.add(ghost(ramp, 'ground'));   // въезд - земля в физике, бока - уступ-стенка
           sign('РАМПА', '#ffb02e', rp.x, rp.y0 + 7, rp.z, 0.6);
         } else if (p.type === 'board') {
           const g = new THREE.Group(); g.position.set(p.x, y, p.z); g.rotation.y = p.rot;
           for (const sx of [-1.4, 1.4]) { const leg = new THREE.Mesh(legGeo, legMat); leg.position.set(sx, 1.5, 0); g.add(leg); }
           const plate = new THREE.Mesh(plateGeo, boardMat); plate.position.y = 3; g.add(plate);
+          g.traverse((o) => { if (o.isMesh) ghost(o, 'breakable'); });        // щит сбивают, проезжая насквозь
           group.add(g); boards[p.id] = g;
           if (S.boards[p.id]) g.visible = false;
         }
@@ -350,23 +361,11 @@
 
   // ======================= КУСКИ =======================
   const key = (cx, cz) => cx + ',' + cz;
-  const nodeInfo = new Map();                 // радиус площадки перекрёстка у каждого узла
-  function junctionR(M, nk) {
-    const c = nodeInfo.get(M.id + nk); if (c !== undefined) return c;
-    const nd = M.nodes[nk]; let hw = 0; for (const e of nd.edges) hw = Math.max(hw, M.edges[e].hw);
-    const r = nd.edges.length >= 2 ? hw + 4.5 : 0; nodeInfo.set(M.id + nk, r); return r;
-  }
-  function inJunction(M, i) {
-    const e = M.edges[M.E[i]];
-    for (const nk of [e.a, e.b]) { const r = junctionR(M, nk); if (r && Math.hypot(M.nodes[nk].x - M.X[i], M.nodes[nk].z - M.Z[i]) < r - 0.5) return true; }
-    return false;
-  }
-  const urbanCache = new Map();
-  function urbanAt(M, i) {                    // тротуары - в городских областях
-    const k = M.id + ':' + (i >> 4); let v = urbanCache.get(k);
-    if (v === undefined) { v = M.regionAt(M.X[i], M.Z[i]).biome === 'concrete'; urbanCache.set(k, v); }
-    return v;
-  }
+  // перекрёстки и тротуары - по правилам мира (те же, что у физики)
+  const junctionR = (M, nk) => M.junctionR(nk), inJunction = (M, i) => M.inJunction(i);
+  // Что на рисунке не твёрдое, помечено: земля, свет, надписи и флаги наверху, ломаемые щиты. Твёрдое - из списка мира (M.solidsIn).
+  const ghost = (o, why) => { o.userData.ghost = why; return o; };
+  const solid = (o, kind) => { o.userData.solid = kind; return o; };
 
   // Кусок строится по частям (генератор): рельеф по полосам строк, дороги, декор. Между частями - другие дела кадра.
   function* buildChunkGen(cx, cz, lod) {
@@ -410,14 +409,13 @@
     tg.setIndex(idx); tg.computeVertexNormals();
     const nr = tg.attributes.normal;
     for (let k = 0; k < nr.count; k++) { const s = 1 - nr.getY(k); if (s > 0.18) { const t = smooth(0.18, 0.5, s); colr[k * 3] += (0.5 - colr[k * 3]) * t; colr[k * 3 + 1] += (0.47 - colr[k * 3 + 1]) * t; colr[k * 3 + 2] += (0.43 - colr[k * 3 + 2]) * t; } }
-    const tm = add(tg, W.mat.terrain); tm.receiveShadow = lod === 0;
+    const tm = ghost(add(tg, W.mat.terrain), 'ground'); tm.receiveShadow = lod === 0;
     yield;
     // дороги: полосы по выборкам, попавшим в кусок; концы у перекрёстков закрывает площадка
     const segs = M.roadSamplesIn(cx, cz, 0);
     const runs = [];
     for (const i of segs) { const last = runs[runs.length - 1]; if (last && last[1] === i && M.E[i] === M.E[last[0]]) last[1] = i + 1; else runs.push([i, i + 1]); }
     const byMat = {}, walk = { pos: [], idx: [] };
-    const lamps = [];
     const strip = (P, list, d0, d1, lift, vScale) => {
       if (list.length < 2) return;
       const base = P.pos.length / 3;
@@ -435,7 +433,7 @@
       let cur = [], curSf = null;
       const flush = () => { if (cur.length > 1) { const P = byMat[curSf] = byMat[curSf] || { pos: [], uv: [], idx: [] }; strip(P, cur, -hw, hw, lift, 12); } cur = []; };
       for (const i of list) {
-        if (inJunction(M, i)) { flush(); continue; }
+        // через перекрёсток полоса идёт насквозь (физика там - полотно), круг площадки лежит поверх
         const sf = M.SF[i];
         if (sf !== curSf && cur.length) { const last = cur[cur.length - 1]; flush(); cur.push(last); }
         curSf = sf; cur.push(i);
@@ -444,64 +442,62 @@
       // тротуары в городе
       if (lod < 2) {
         let wl = [];
-        const wflush = () => { if (wl.length > 1) for (const sd of [-1, 1]) strip(walk, wl, sd * hw, sd * (hw + 3), lift + 0.12, 1); wl = []; };
-        for (const i of list) { if (!inJunction(M, i) && !(M.FL[i] & 3) && urbanAt(M, i)) wl.push(i); else wflush(); }
+        // обход вершин одинаковый с обеих сторон (от левого края к правому): иначе левый тротуар смотрел бы лицом вниз и не рисовался
+        const wflush = () => { if (wl.length > 1) { strip(walk, wl, -hw - 3, -hw, lift + 0.12, 1); strip(walk, wl, hw, hw + 3, lift + 0.12, 1); } wl = []; };
+        for (const i of list) { if (M.sidewalkAt(i)) wl.push(i); else wflush(); }
         wflush();
       }
       // мост: ограждения и опоры; тоннель: стены, свод, свет, гора сверху и порталы
       if (lod < 2) {
         const bridge = list.filter((i) => M.FL[i] & 1), tunnel = list.filter((i) => M.FL[i] & 2);
         if (bridge.length > 1) {
-          for (const sd of [-1, 1]) add(stripGeom(M, bridge, sd * (hw + 0.2), 0.05, 1.1, 'wall'), W.mat.rail);
-          add(stripGeom(M, bridge, -hw - 0.3, -1.4, hw + 0.3, 'slab'), W.mat.concrete);
-          if (lod === 0) for (let k = 0; k < bridge.length; k += Math.max(1, Math.round(26 / e.step / step))) {
-            const i = bridge[k], ground = Math.max(M.RAW[i], WD.WATER - 6), hgt = M.Y[i] - 1.4 - ground;
-            if (hgt > 1) { const mm = new THREE.Mesh(W.geo.pillar, W.mat.concrete); mm.scale.set(1, hgt, 1); mm.position.set(M.X[i], M.Y[i] - 1.4, M.Z[i]); group.add(mm); }
-          }
+          for (const sd of [-1, 1]) ghost(add(stripGeom(M, bridge, sd * (hw + 0.2), 0.05, 1.1, 'wall'), W.mat.rail), 'wall');   // ограждение: стенка дороги в физике
+          ghost(add(stripGeom(M, bridge, -hw - 0.3, -1.4, hw + 0.3, 'slab'), W.mat.concrete), 'ground');
         }
         if (tunnel.length > 1) {
-          for (const sd of [-1, 1]) add(stripGeom(M, tunnel, sd * (hw + 1), 0, 7, 'wall'), W.mat.tunnel);
-          add(stripGeom(M, tunnel, -hw - 1.2, 7, hw + 1.2, 'slab'), W.mat.tunnel);
-          add(stripGeom(M, tunnel, -hw - 1.1, 0.0, hw + 1.1, 'slab'), W.mat.tunnel);          // пол тоннеля от стены до стены
-          add(stripGeom(M, tunnel, -0.3, 6.9, 0.3, 'slab'), W.mat.tunnelLight);
-          add(capGeom(M, tunnel, hw + 7.5), W.mat.rock);
-          for (const i of tunnel) {
-            const first = !(M.FL[i - 1] & 2), last = !(M.FL[i + 1] & 2);
-            if ((first && i > e.i0) || (last && i < e.i1)) portal(M, i, hw, group);
-          }
+          for (const sd of [-1, 1]) ghost(add(stripGeom(M, tunnel, sd * (hw + 1), 0, 7, 'wall'), W.mat.tunnel), 'wall');
+          ghost(add(stripGeom(M, tunnel, -hw - 1.2, 7, hw + 1.2, 'slab'), W.mat.tunnel), 'overhead');
+          ghost(add(stripGeom(M, tunnel, -hw - 1.1, 0.0, hw + 1.1, 'slab'), W.mat.tunnel), 'ground');          // пол тоннеля от стены до стены
+          ghost(add(stripGeom(M, tunnel, -0.3, 6.9, 0.3, 'slab'), W.mat.tunnelLight), 'overhead');
+          ghost(add(capGeom(M, tunnel, hw + 7.5), W.mat.rock), 'ground');
         }
       }
-      if (e.T.lamps && lod < 2) for (let i = a; i < b; i++) if (M.S[i] % 60 < e.step && !(M.FL[i] & 2) && !inJunction(M, i)) lamps.push([i, (Math.floor(M.S[i] / 60) % 2) ? 1 : -1, hw]);
     }
     for (const sf in byMat) {
       const P = byMat[sf], g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(P.pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(P.uv, 2)); g.setIndex(P.idx); g.computeVertexNormals();
-      const m = add(g, W.mat.road[sf] || W.mat.road.asphalt); m.receiveShadow = lod === 0;
+      const m = ghost(add(g, W.mat.road[sf] || W.mat.road.asphalt), 'ground'); m.receiveShadow = lod === 0;
     }
     if (walk.pos.length) {
       const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(walk.pos, 3)); g.setIndex(walk.idx); g.computeVertexNormals();
-      const m = add(g, W.mat.sidewalk); m.receiveShadow = lod === 0;
+      const m = ghost(add(g, W.mat.sidewalk), 'ground'); m.receiveShadow = lod === 0;
     }
     // площадки перекрёстков - у узлов внутри куска
     for (const nk in M.nodes) {
       const nd = M.nodes[nk], r0 = junctionR(M, nk);
       if (!r0 || Math.floor(nd.x / CH) !== cx || Math.floor(nd.z / CH) !== cz) continue;
-      const m = new THREE.Mesh(W.geo.disc, W.mat.plain); m.scale.set(r0 + 0.6, 1, r0 + 0.6); m.position.set(nd.x, nd.y + 0.08, nd.z); m.receiveShadow = lod === 0; group.add(m);
+      const m = ghost(new THREE.Mesh(W.geo.disc, W.mat.plain), 'ground'); m.scale.set(r0 + 0.6, 1, r0 + 0.6); m.position.set(nd.x, nd.y + 0.08, nd.z); m.receiveShadow = lod === 0; group.add(m);
+    }
+    // опоры мостов и порталы тоннелей - из списка твёрдых предметов мира
+    if (lod === 0) for (const p of M.chunkPillars(cx, cz)) { const mm = solid(new THREE.Mesh(W.geo.pillar, W.mat.concrete), 'pillar'); mm.scale.set(1, p.y1 - p.y0, 1); mm.position.set(p.x, p.y1, p.z); mm.rotation.y = p.rot; group.add(mm); }
+    if (lod < 2) for (const pt of M.chunkPortals(cx, cz)) for (const b of pt.parts) {
+      const mm = solid(new THREE.Mesh(W.geo.box, W.mat.concrete), 'portal'); mm.scale.set(b.w, b.y1 - b.y0, b.d); mm.position.set(b.x, (b.y0 + b.y1) / 2, b.z); mm.rotation.y = b.rot; group.add(mm);
     }
     yield;
     // фонари и пятна света под ними
+    const lamps = lod < 2 ? M.chunkLamps(cx, cz) : [];
     if (lamps.length) {
       const poles = new THREE.InstancedMesh(W.geo.lampPole, W.mat.prop, lamps.length), heads = new THREE.InstancedMesh(W.geo.lampHead, W.mat.lampHead, lamps.length), pools = new THREE.InstancedMesh(W.geo.pool, W.mat.pool, lamps.length);
       const m = new THREE.Matrix4(), qq = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1);
-      lamps.forEach(([i, sd, hw], k) => {
-        const nx = -M.TZ[i], nz = M.TX[i], x = M.X[i] + nx * sd * (hw + 0.8), z = M.Z[i] + nz * sd * (hw + 0.8);
-        e.set(0, Math.atan2(-nx * sd, -nz * sd), 0); qq.setFromEuler(e);
+      lamps.forEach((L, k) => {
+        const i = L.i, sd = L.sd, nx = -M.TZ[i], nz = M.TX[i], x = L.x, z = L.z;
+        e.set(0, L.rot, 0); qq.setFromEuler(e);
         m.compose(v.set(x, M.Y[i], z), qq, one); poles.setMatrixAt(k, m);
         m.compose(v.set(x - nx * sd * 2, M.Y[i] + 7.8, z - nz * sd * 2), qq, one); heads.setMatrixAt(k, m);
         e.set(0, Math.atan2(M.TX[i], M.TZ[i]), 0); qq.setFromEuler(e);
         m.compose(v.set(x - nx * sd * 3, M.Y[i] + 0.1, z - nz * sd * 3), qq, one); pools.setMatrixAt(k, m);
       });
-      pools.renderOrder = 2;
+      pools.renderOrder = 2; solid(poles, 'lamp'); ghost(heads, 'overhead'); ghost(pools, 'light');
       group.add(poles); group.add(heads); group.add(pools); inst.push(poles, heads, pools); W.poolMeshes.add(pools);
     }
     // декор: общий список куска (тот же, что для столкновений)
@@ -524,7 +520,7 @@
         else if (t === 'building') { cc2.setHSL(0.58 + d.col * 0.1, 0.08, d.h > 45 ? 0.72 + d.col * 0.2 : 0.5 + d.col * 0.35); im.setColorAt(k, cc2); }
       });
       im.castShadow = lod === 0 && t !== 'rock'; im.receiveShadow = false;
-      group.add(im); inst.push(im);
+      solid(im, t); group.add(im); inst.push(im);
     }
     return { key: key(cx, cz), cx, cz, lod, group, geos, inst };
   }
@@ -550,23 +546,12 @@
       const nx = -M.TZ[i], nz = M.TX[i];
       for (const sd of [-1, 0, 1]) {
         const x = M.X[i] + nx * sd * half, z = M.Z[i] + nz * sd * half;
-        pos.push(x, M.terrainHeight(x, z) + 0.08, z); uv.push(x / 24, z / 24);
+        pos.push(x, Math.max(M.terrainHeight(x, z), M.Y[i] + 7.4) + 0.08, z); uv.push(x / 24, z / 24);
       }
       if (k > 0) { const b = (k - 1) * 3; idx.push(b, b + 3, b + 1, b + 1, b + 3, b + 4, b + 1, b + 4, b + 2, b + 2, b + 4, b + 5); }
     });
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals();
     return g;
-  }
-  // Портал тоннеля: две опоры по бокам проезда и перемычка над ним, до верха горы.
-  function portal(M, i, hw, group) {
-    const h = Math.atan2(M.TX[i], M.TZ[i]), y = M.Y[i], top = Math.max(M.terrainHeight(M.X[i], M.Z[i]), y + COVER) + 0.6, nx = -M.TZ[i], nz = M.TX[i];
-    const side = 13, thick = 2.2;
-    const box = (cxl, cy, w, hgt) => {
-      const m = new THREE.Mesh(W.geo.box, W.mat.concrete); m.scale.set(w, hgt, thick);
-      m.position.set(M.X[i] + nx * cxl, cy, M.Z[i] + nz * cxl); m.rotation.y = h; group.add(m);
-    };
-    for (const sd of [-1, 1]) box(sd * (hw + 1 + side / 2), (y - 3 + top) / 2, side, top - y + 3);
-    box(0, (y + 7 + top) / 2, 2 * (hw + 1) + 0.2, top - y - 7);
   }
   function disposeChunk(ch) {
     W.scene.remove(ch.group);
@@ -629,7 +614,7 @@
       const look = c.look || C.defaultLook(c.carId);
       const cp = R._.capture(() => R._.buildCar(c.carId, look, { own: true }));
       const cm = cp.r; cm.owned = cp.owned; cm.roll = 0; cm.pitch = 0; cm.spin = 0;
-      cm.root.traverse((o) => { if (o.isMesh && o !== cm.blob) o.castShadow = c.isPlayer; });
+      cm.root.traverse((o) => { if (o.isMesh && o !== cm.blob) o.castShadow = c.isPlayer; o.userData.car = true; });
       W.scene.add(cm.root); W.carMeshes.set(c, cm);
     }
     if (W.carMeshes.size > world.cars.length) {
@@ -697,9 +682,20 @@
       let h = c.h; if (c.ih !== undefined) { let dh = c.h - c.ih; if (dh > Math.PI) dh -= 2 * Math.PI; if (dh < -Math.PI) dh += 2 * Math.PI; h = c.ih + dh * alpha; }
       cm.root.position.set(x, y, z); cm.root.rotation.order = 'YXZ'; cm.root.rotation.y = h;
       const fx = Math.sin(h), fz = Math.cos(h);
-      if (!c.air) { const yf = M.groundAt(x + fx * 1.8, z + fz * 1.8, gq, y).y, yb = M.groundAt(x - fx * 1.8, z - fz * 1.8, gq, y).y; cm.pitch += (-Math.atan2(yf - yb, 3.6) - cm.pitch) * Math.min(1, dt * 10); }
-      else cm.pitch += (Math.max(-0.4, Math.min(0.4, -c.vy * 0.03)) - cm.pitch) * Math.min(1, dt * 3);
-      cm.root.rotation.x = cm.pitch;
+      const jump = cm.lastX === undefined || Math.abs(x - cm.lastX) + Math.abs(z - cm.lastZ) > 6; cm.lastX = x; cm.lastZ = z;
+      const hl = (c.st.len || 4.3) / 2 - 0.3, hwb = (c.st.wid || 1.8) / 2 - 0.1, rx = -fz, rz = fx;
+      cm.bank = cm.bank || 0;
+      if (!c.air) {
+        const yf = M.groundAt(x + fx * hl, z + fz * hl, gq, y).y, yb = M.groundAt(x - fx * hl, z - fz * hl, gq, y).y;
+        const yl = M.groundAt(x - rx * hwb, z - rz * hwb, gq, y).y, yr = M.groundAt(x + rx * hwb, z + rz * hwb, gq, y).y;
+        const tp = -Math.atan2(yf - yb, 2 * hl), tb = Math.atan2(yl - yr, 2 * hwb), kk = jump ? 1 : Math.min(1, dt * 10);
+        cm.pitch += (tp - cm.pitch) * kk; cm.bank += (tb - cm.bank) * kk;
+        // неровная земля (углы не в одной плоскости): кузов поднимается, чтобы ни один угол не ушёл в землю
+        let lift = 0; const sp = Math.tan(-cm.pitch), sb = Math.tan(cm.bank);
+        for (const [a, b2] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) { const gx = x + fx * hl * a + rx * hwb * b2, gz = z + fz * hl * a + rz * hwb * b2, pl = y + sp * hl * a - sb * hwb * b2; lift = Math.max(lift, M.groundAt(gx, gz, gq, y).y - pl); }
+        cm.root.position.y = y + Math.min(0.5, lift);
+      } else { cm.pitch += (Math.max(-0.4, Math.min(0.4, -c.vy * 0.03)) - cm.pitch) * Math.min(1, dt * 3); cm.bank *= 1 - Math.min(1, dt * 3); }
+      cm.root.rotation.x = cm.pitch; cm.root.rotation.z = cm.bank;
       const k2 = 1 - Math.exp(-dt * 8);
       cm.roll += (C.clamp(-(c.w || 0) * (c.speed || 0) * 0.006, -0.07, 0.07) - cm.roll) * k2; cm.body.rotation.z = cm.roll;
       cm.spin += (c.vLong || 0) * dt / cm.S.wr;
@@ -738,7 +734,7 @@
     const fx = Math.sin(ph), fz = Math.cos(ph), farD = (W.radius + 0.6) * WD.CHUNK + 400;
     if (W.photo) {
       const ph2 = W.photo;
-      cam.position.set(px + Math.sin(ph2.yaw) * Math.cos(ph2.pitch) * ph2.dist, py + 1 + Math.sin(ph2.pitch) * ph2.dist, pz + Math.cos(ph2.yaw) * Math.cos(ph2.pitch) * ph2.dist);
+      armTo(cam, px, py + 1.2, pz, px + Math.sin(ph2.yaw) * Math.cos(ph2.pitch) * ph2.dist, py + 1 + Math.sin(ph2.pitch) * ph2.dist, pz + Math.cos(ph2.yaw) * Math.cos(ph2.pitch) * ph2.dist, p.y, st, true);
       tmpV.set(px, py + 1, pz); cam.lookAt(tmpV);
     } else if (camMode === 'hood') {
       cam.position.set(px + fx * 0.35, py + 1.25, pz + fz * 0.35); tmpV.set(px + fx * 30, py + 1.0, pz + fz * 30); cam.lookAt(tmpV); st.init = false;
@@ -748,17 +744,29 @@
       if (sp > 4) { const vl = Math.hypot(p.vx, p.vz); dx = fx * 0.6 + p.vx / vl * 0.4; dz = fz * 0.6 + p.vz / vl * 0.4; const l = Math.hypot(dx, dz); dx /= l; dz /= l; }
       const tx = px - dx * back, tz = pz - dz * back;
       let ty = py + up; const gy = W.M.groundAt(tx, tz, gq, py).y; if (ty < gy + 1.2) ty = gy + 1.2;
-      if (!st.init || Math.hypot(tx - st.x, tz - st.z) > 25) { st.x = tx; st.y = ty; st.z = tz; st.init = true; }
+      if (!st.init || Math.hypot(tx - st.x, tz - st.z) > 25) { st.x = tx; st.y = ty; st.z = tz; st.init = true; st.armInit = false; }
       const kk = 1 - Math.exp(-dt * 7); st.x += (tx - st.x) * kk; st.y += (ty - st.y) * kk; st.z += (tz - st.z) * kk;
-      cam.position.set(st.x, st.y, st.z); tmpV.set(px + fx * 3, py + 1.1, pz + fz * 3); cam.lookAt(tmpV);
+      // пружинная штанга: от крыши машины к месту камеры; что встало между (дом, шатёр, склон, свод тоннеля) - камера ближе
+      armTo(cam, px, py + 1.5, pz, st.x, st.y, st.z, p.y, st, false);
+      tmpV.set(px + fx * 3, py + 1.1, pz + fz * 3); cam.lookAt(tmpV);
     }
     const fovT = 60 + Math.min(1, p.speed / 70) * 16 + (p.nitroOn ? 6 : 0);
     st.fov += (fovT - st.fov) * (1 - Math.exp(-dt * 3));
-    cam.fov = W.photo ? 55 : st.fov; cam.near = 0.3; cam.far = farD; cam.updateProjectionMatrix();
+    cam.fov = W.photo ? 55 : st.fov; cam.near = CAM_NEAR; cam.far = farD; cam.updateProjectionMatrix();
     // фара: над машиной, светит вниз-вперёд
     W.headlight.position.set(px + fx * 0.5, py + 4.5, pz + fz * 0.5); W.headlight.target.position.set(px + fx * 22, py, pz + fz * 22); W.headlight.target.updateMatrixWorld();
   }
 
+  // Камера на штанге от опоры (ax, ay, az) к желаемому месту: шар радиуса CAM_R не входит ни в предметы мира, ни в землю,
+  // ни в свод и стены тоннеля. Штанга укорачивается сразу, удлиняется плавно (st.arm - доля длины).
+  const CAM_R = 0.5, CAM_NEAR = 0.2;
+  function armTo(cam, ax, ay, az, bx, by, bz, yRef, st, instant) {
+    const t = W.M.sweep(ax, ay, az, bx, by, bz, CAM_R, yRef);
+    if (st.arm === undefined || instant || !st.armInit) { st.arm = t; st.armInit = true; }
+    else if (t < st.arm) st.arm = t; else st.arm += (t - st.arm) * 0.08;
+    st.armFree = t;
+    cam.position.set(ax + (bx - ax) * st.arm, ay + (by - ay) * st.arm, az + (bz - az) * st.arm);
+  }
   W.photoMode = function (on) { W.photo = on ? { yaw: (W.world.player.h || 0) + Math.PI + 0.6, pitch: 0.25, dist: 9 } : null; };
   W.photoMove = function (dyaw, dpitch, dzoom) { if (!W.photo) return; W.photo.yaw += dyaw; W.photo.pitch = C.clamp(W.photo.pitch + dpitch, -0.1, 1.3); W.photo.dist = C.clamp(W.photo.dist * dzoom, 3.5, 40); };
   W.breakBoard = function (pt) {

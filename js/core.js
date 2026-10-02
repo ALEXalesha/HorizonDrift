@@ -297,6 +297,7 @@
     st.crr = 0.013;
     st.cd = Math.max(0.05, (st.power / st.top - st.mass * G * st.crr) / (st.top * st.top));
     st.I = st.mass * 1.45;
+    const body = D.BODY[def.shape] || D.BODY.coupe; st.len = body.L; st.wid = body.W; st.shape = def.shape || 'coupe';
     st.levels = lv;
     return st;
   }
@@ -782,27 +783,7 @@
         for (let j = i + 1; j < cs.length; j++) {
           const b = cs[j]; if (b.out || b.ghost > 0) continue;
           if (Math.abs(a.x - b.x) > 6 || Math.abs(a.z - b.z) > 6) continue;
-          for (let ka = -1.15; ka <= 1.15; ka += 2.3) {
-            for (let kb = -1.15; kb <= 1.15; kb += 2.3) {
-              const ax = a.x + Math.sin(a.h) * ka, az = a.z + Math.cos(a.h) * ka;
-              const bx = b.x + Math.sin(b.h) * kb, bz = b.z + Math.cos(b.h) * kb;
-              let dx = bx - ax, dz = bz - az; const d = Math.hypot(dx, dz);
-              if (d >= 2 || d < 1e-6) continue;
-              dx /= d; dz /= d;
-              const ima = 1 / a.st.mass, imb = 1 / b.st.mass, pen = 2 - d;
-              a.x -= dx * pen * ima / (ima + imb); a.z -= dz * pen * ima / (ima + imb);
-              b.x += dx * pen * imb / (ima + imb); b.z += dz * pen * imb / (ima + imb);
-              const rax = -Math.cos(a.h), raz = Math.sin(a.h), rbx = -Math.cos(b.h), rbz = Math.sin(b.h);
-              const vax = a.vx + a.w * ka * rax, vaz = a.vz + a.w * ka * raz, vbx = b.vx + b.w * kb * rbx, vbz = b.vz + b.w * kb * rbz;
-              const vrel = (vbx - vax) * dx + (vbz - vaz) * dz;
-              if (vrel >= 0) continue;
-              const la = ka * (rax * dx + raz * dz), lb = kb * (rbx * dx + rbz * dz);
-              const J = -1.3 * vrel / (ima + imb + la * la / a.st.I + lb * lb / b.st.I);
-              b.vx += J * imb * dx; b.vz += J * imb * dz; b.w += J * lb / b.st.I;
-              a.vx -= J * ima * dx; a.vz -= J * ima * dz; a.w -= J * la / a.st.I;
-              a.hit = Math.max(a.hit, -vrel); b.hit = Math.max(b.hit, -vrel);
-            }
-          }
+          collideCarPair(a, b, 0.3);            // кузова - прямоугольники по размерам машин
         }
       }
     }
@@ -1149,6 +1130,106 @@
     }
     return out;
   }
+
+  // ---------- Столкновения: кузов - повёрнутый прямоугольник по размерам машины ----------
+  // Оси машины: f - вперёд (sin h, cos h), r - вправо (-cos h, sin h); полудлина и полуширина - из кузова.
+  // Контакт: nx, nz - нормаль от препятствия к машине, pen - глубина, px, pz - точка касания.
+  function carHalf(c) { const st = c.st || {}; return [(st.len || 4.3) / 2, (st.wid || 1.8) / 2]; }
+  // Кузов против неподвижной коробки: центр bx, bz, размеры bw (поперёк) и bd (вдоль), поворот rot (как у домов).
+  function carBoxContact(c, bx, bz, bw, bd, rot, out) {
+    const hc = carHalf(c), hl = hc[0], hw = hc[1], fx = Math.sin(c.h), fz = Math.cos(c.h), rx = -fz, rz = fx;
+    const ux = Math.cos(rot), uz = -Math.sin(rot), vx = Math.sin(rot), vz = Math.cos(rot), bhw = bw / 2, bhd = bd / 2;
+    const dx = c.x - bx, dz = c.z - bz;
+    let best = 1e9, nx = 0, nz = 0, fromBox = true;
+    for (let k = 0; k < 4; k++) {
+      const ax = k === 0 ? fx : k === 1 ? rx : k === 2 ? ux : vx, az = k === 0 ? fz : k === 1 ? rz : k === 2 ? uz : vz;
+      const rc = hl * Math.abs(fx * ax + fz * az) + hw * Math.abs(rx * ax + rz * az);
+      const rb = bhw * Math.abs(ux * ax + uz * az) + bhd * Math.abs(vx * ax + vz * az);
+      const dist = dx * ax + dz * az, ov = rc + rb - Math.abs(dist);
+      if (ov <= 0) return null;
+      if (ov < best) { best = ov; const s = dist >= 0 ? 1 : -1; nx = ax * s; nz = az * s; fromBox = k >= 2; }
+    }
+    let px = c.x, pz = c.z, m = fromBox ? 1e18 : -1e18;
+    for (let a = -1; a <= 1; a += 2) for (let b = -1; b <= 1; b += 2) {
+      const x = fromBox ? c.x + fx * hl * a + rx * hw * b : bx + ux * bhw * a + vx * bhd * b;
+      const z = fromBox ? c.z + fz * hl * a + rz * hw * b : bz + uz * bhw * a + vz * bhd * b;
+      const pr = x * nx + z * nz;
+      if (fromBox ? pr < m : pr > m) { m = pr; px = x; pz = z; }
+    }
+    out = out || {}; out.nx = nx; out.nz = nz; out.pen = best; out.px = px; out.pz = pz; return out;
+  }
+  // Кузов против столба (круг радиуса r в плане).
+  function carCircleContact(c, x, z, r, out) {
+    const hc = carHalf(c), hl = hc[0], hw = hc[1], fx = Math.sin(c.h), fz = Math.cos(c.h), rx = -fz, rz = fx;
+    const dx = x - c.x, dz = z - c.z, lf = dx * fx + dz * fz, lr = dx * rx + dz * rz;
+    const cf = clamp(lf, -hl, hl), cr = clamp(lr, -hw, hw), ef = lf - cf, er = lr - cr, d = Math.hypot(ef, er);
+    let nf, nr, pen;
+    if (d > 1e-6) { if (d >= r) return null; nf = -ef / d; nr = -er / d; pen = r - d; }
+    else { const of = hl - Math.abs(lf), or = hw - Math.abs(lr); if (of < or) { nf = lf > 0 ? -1 : 1; nr = 0; pen = of + r; } else { nf = 0; nr = lr > 0 ? -1 : 1; pen = or + r; } }
+    out = out || {}; out.nx = nf * fx + nr * rx; out.nz = nf * fz + nr * rz; out.pen = pen; out.px = c.x + cf * fx + cr * rx; out.pz = c.z + cf * fz + cr * rz; return out;
+  }
+  // Скорость точки кузова (px, pz): v + w * (k r - s f), где k - вынос вперёд, s - вправо.
+  function leverOf(c, px, pz, nx, nz) {
+    const fx = Math.sin(c.h), fz = Math.cos(c.h), rx = -fz, rz = fx, ox = px - c.x, oz = pz - c.z;
+    const kf = ox * fx + oz * fz, kr = ox * rx + oz * rz, tx = kf * rx - kr * fx, tz = kf * rz - kr * fz;
+    return [tx, tz, tx * nx + tz * nz];
+  }
+  // Вытолкнуть и погасить скорость в препятствие (импульс с плечом, трение вдоль стенки).
+  function resolveStatic(c, k, e) {
+    c.x += k.nx * k.pen; c.z += k.nz * k.pen;
+    const lv = leverOf(c, k.px, k.pz, k.nx, k.nz), w = c.w || 0;
+    const vn = (c.vx + w * lv[0]) * k.nx + (c.vz + w * lv[1]) * k.nz;
+    if (vn >= 0) return 0;
+    const m = c.st.mass, I = c.st.I, J = -(1 + (e === undefined ? 0.3 : e)) * vn / (1 / m + lv[2] * lv[2] / I);
+    c.vx += J / m * k.nx; c.vz += J / m * k.nz; c.w = w + J * lv[2] / I;
+    const vnn = c.vx * k.nx + c.vz * k.nz, tvx = c.vx - vnn * k.nx, tvz = c.vz - vnn * k.nz, tv = Math.hypot(tvx, tvz);
+    if (tv > 0.01) { const dv = Math.min(tv, 0.3 * J / m); c.vx -= tvx / tv * dv; c.vz -= tvz / tv * dv; }
+    c.hit = Math.max(c.hit || 0, -vn);
+    return -vn;
+  }
+  // Две машины: разделяющие оси обоих прямоугольников, раздвинуть по массам, импульс с плечами.
+  const ccA = {}, ccB = {};
+  function carCarContact(a, b, out) {
+    const ha = carHalf(a), hb = carHalf(b);
+    const afx = Math.sin(a.h), afz = Math.cos(a.h), arx = -afz, arz = afx, bfx = Math.sin(b.h), bfz = Math.cos(b.h), brx = -bfz, brz = bfx;
+    const dx = a.x - b.x, dz = a.z - b.z;
+    let best = 1e9, nx = 0, nz = 0, fromA = true;
+    for (let k = 0; k < 4; k++) {
+      const ax = k === 0 ? afx : k === 1 ? arx : k === 2 ? bfx : brx, az = k === 0 ? afz : k === 1 ? arz : k === 2 ? bfz : brz;
+      const ra = ha[0] * Math.abs(afx * ax + afz * az) + ha[1] * Math.abs(arx * ax + arz * az);
+      const rb = hb[0] * Math.abs(bfx * ax + bfz * az) + hb[1] * Math.abs(brx * ax + brz * az);
+      const dist = dx * ax + dz * az, ov = ra + rb - Math.abs(dist);
+      if (ov <= 0) return null;
+      if (ov < best) { best = ov; const s = dist >= 0 ? 1 : -1; nx = ax * s; nz = az * s; fromA = k < 2; }
+    }
+    // нормаль - от b к a; при оси машины a касается самый глубокий угол b, иначе - угол a
+    const src = fromA ? b : a, hs = fromA ? hb : ha, sfx = Math.sin(src.h), sfz = Math.cos(src.h), srx = -sfz, srz = sfx;
+    let px = src.x, pz = src.z, m = fromA ? -1e18 : 1e18;
+    for (let p = -1; p <= 1; p += 2) for (let q = -1; q <= 1; q += 2) {
+      const x = src.x + sfx * hs[0] * p + srx * hs[1] * q, z = src.z + sfz * hs[0] * p + srz * hs[1] * q, pr = x * nx + z * nz;
+      if (fromA ? pr > m : pr < m) { m = pr; px = x; pz = z; }
+    }
+    out = out || {}; out.nx = nx; out.nz = nz; out.pen = best; out.px = px; out.pz = pz; return out;
+  }
+  function collideCarPair(a, b, e) {
+    const k = carCarContact(a, b, ccA); if (!k) return 0;
+    const ima = 1 / a.st.mass, imb = 1 / b.st.mass, sh = k.pen / (ima + imb);
+    a.x += k.nx * sh * ima; a.z += k.nz * sh * ima; b.x -= k.nx * sh * imb; b.z -= k.nz * sh * imb;
+    const la = leverOf(a, k.px, k.pz, k.nx, k.nz), lb = leverOf(b, k.px, k.pz, k.nx, k.nz), wa = a.w || 0, wb = b.w || 0;
+    const vrel = (a.vx + wa * la[0] - b.vx - wb * lb[0]) * k.nx + (a.vz + wa * la[1] - b.vz - wb * lb[1]) * k.nz;
+    if (vrel >= 0) return 0;
+    const J = -(1 + (e === undefined ? 0.3 : e)) * vrel / (ima + imb + la[2] * la[2] / a.st.I + lb[2] * lb[2] / b.st.I);
+    a.vx += J * ima * k.nx; a.vz += J * ima * k.nz; a.w = wa + J * la[2] / a.st.I;
+    b.vx -= J * imb * k.nx; b.vz -= J * imb * k.nz; b.w = wb - J * lb[2] / b.st.I;
+    a.hit = Math.max(a.hit || 0, -vrel); b.hit = Math.max(b.hit || 0, -vrel);
+    return -vrel;
+  }
+  // Углы кузова в плане (для проверок и рисования).
+  function carCorners(c) {
+    const hc = carHalf(c), fx = Math.sin(c.h), fz = Math.cos(c.h), rx = -fz, rz = fx, out = [];
+    for (const [a, b] of [[1, 1], [1, -1], [-1, -1], [-1, 1]]) out.push([c.x + fx * hc[0] * a + rx * hc[1] * b, c.z + fz * hc[0] * a + rz * hc[1] * b]);
+    return out;
+  }
   function toUnits(ms, units) { return units === 'mph' ? ms * 2.23694 : ms * 3.6; }
   function fmtTime(t) {
     if (t == null || !isFinite(t)) return '--:--.--';
@@ -1158,5 +1239,6 @@
 
   return { G, DT, STEP, GEARS, clamp, lerp, mulberry32, hashStr, buildTrack, project, pointAt, idxAt, trackClearance, solveAutos, runTurtle,
     carDef, carStats, upgradeLevels, makeCar, stepCar, accelTime, surfMu, DriftScorer, speedProfile, Race, botTime, timeThresholds, TIME_MEDALS,
+    carBoxContact, carCircleContact, carCarContact, collideCarPair, resolveStatic, carCorners,
     medalFor, rewardFor, findEvent, newCareer, defaultLook, Career, sanitizeCareer, sanitizeRecords, cleanLook, eventEntries, mergeSettings, rebind, toUnits, fmtTime, MEDAL_RANK };
 });

@@ -39,6 +39,19 @@
       color: '#16c7c0', about: 'Вершина гаража: полный привод, огромная мощность, прижим как у болида.' },
   ];
 
+  // Кузов по форме: длина и ширина (м) - одни и те же для рисунка и для столкновений.
+  // Салон: высота глаз, вынос руля, цвет панели и отделки, каркас безопасности.
+  const BODY = {
+    hatch: { L: 3.9, W: 1.74, eye: 1.18, dash: '#3a3d42', trim: '#6b6f76', accent: '#ff7a3a' },
+    coupe: { L: 4.3, W: 1.8, eye: 1.1, dash: '#1d1f24', trim: '#3a3e46', accent: '#3aa0ff' },
+    fastback: { L: 4.4, W: 1.82, eye: 1.08, dash: '#17181c', trim: '#2c2f36', accent: '#ffb02e' },
+    rally: { L: 4.1, W: 1.8, eye: 1.28, dash: '#2a2d31', trim: '#8a9098', accent: '#ffd23a', cage: true },
+    gt: { L: 4.6, W: 1.9, eye: 1.05, dash: '#3b2a20', trim: '#8a6a4a', accent: '#e8d2a0' },
+    muscle: { L: 4.8, W: 1.95, eye: 1.14, dash: '#2a1c14', trim: '#6a4a2e', accent: '#ff5a1f' },
+    wedge: { L: 4.5, W: 1.98, eye: 0.98, dash: '#121315', trim: '#26282d', accent: '#ff3b3b' },
+    hyper: { L: 4.7, W: 2.02, eye: 0.96, dash: '#0e1113', trim: '#1f2429', accent: '#16e0d8' },
+  };
+
   // ---------- Тюнинг ----------
   // Каждый уровень меняет характеристику на долю из eff: итог = база * (1 + доля * уровень).
   const UPGRADES = [
@@ -224,7 +237,7 @@
   const DIFFICULTY = { easy: { name: 'Легко', pace: -0.07, mistakes: 0.05 }, normal: { name: 'Нормально', pace: 0, mistakes: 0.025 },
     hard: { name: 'Сложно', pace: 0.05, mistakes: 0.008 } };
 
-  return { CARS, UPGRADES, UPG_MAX, UPG_PRICE, TIER_MUL, SURF, TRACKS, THEMES, CUPS, EVENT_TYPES, BASE_REWARD, PLACE_SHARE,
+  return { CARS, BODY, UPGRADES, UPG_MAX, UPG_PRICE, TIER_MUL, SURF, TRACKS, THEMES, CUPS, EVENT_TYPES, BASE_REWARD, PLACE_SHARE,
     MEDAL_SHARE, DRIVERS, RIVALS, PAINTS, RIMS, RIM_COLORS, LIVERIES, ACTIONS, DEFAULT_BINDINGS, DEFAULT_SETTINGS, QUALITY,
     DRAW_DIST, DIFFICULTY };
 });

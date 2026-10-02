@@ -211,6 +211,8 @@
       A.edges.push(ei); B.edges.push(ei);
     });
     const N = pts.length;
+    // радиус площадки перекрёстка: у узла с двумя и больше дорогами - самая широкая дорога + 4.5 м
+    function junctionRadius(k) { const nd = nodes[k]; if (!nd || nd.edges.length < 2) return 0; let hw = 0; for (const id of nd.edges) hw = Math.max(hw, edges[id].hw); return hw + 4.5; }
     const X = new Float64Array(N), Z = new Float64Array(N), Y = new Float64Array(N), RAW = new Float64Array(N), TX = new Float64Array(N), TZ = new Float64Array(N),
       S = new Float64Array(N), K = new Float64Array(N), E = new Int32Array(N), FL = new Uint8Array(N);
     for (let i = 0; i < N; i++) { X[i] = pts[i][0]; Z[i] = pts[i][1]; E[i] = pts[i][2]; S[i] = pts[i][3]; RAW[i] = rawHeight(X[i], Z[i]); }
@@ -227,14 +229,17 @@
         for (let k = 0; k < n; k++) { let s = 0, c = 0; for (let q = Math.max(0, k - rad); q <= Math.min(n - 1, k + rad); q += 2) { s += cp[q]; c++; } y[k] = s / c; }
       }
       const ya = nodes[e.a].y, yb = nodes[e.b].y, blend = Math.min(60, n >> 2);
+      const flatA = Math.min(n >> 2, Math.ceil((junctionRadius(e.a) + 5) / e.step)), flatB = Math.min(n >> 2, Math.ceil((junctionRadius(e.b) + 5) / e.step));
+      const pinFlat = () => { for (let k = 0; k <= flatA; k++) y[k] = ya; for (let k = 0; k <= flatB; k++) y[n - 1 - k] = yb; };
       for (let k = 0; k < blend; k++) { const t = smooth(0, 1, k / blend); y[k] = lerp(ya, y[k], t); y[n - 1 - k] = lerp(yb, y[n - 1 - k], t); }
       y[0] = ya; y[n - 1] = yb;
       const gmax = e.T.grade * e.step;
       for (let it = 0; it < 3; it++) {
+        pinFlat();
         for (let k = 1; k < n; k++) y[k] = clamp(y[k], y[k - 1] - gmax, y[k - 1] + gmax);
-        y[n - 1] = yb;
+        y[n - 1] = yb; pinFlat();
         for (let k = n - 2; k >= 0; k--) y[k] = clamp(y[k], y[k + 1] - gmax, y[k + 1] + gmax);
-        y[0] = ya;
+        y[0] = ya; pinFlat();
       }
       const opt = def.edges[e.id][3] || {};
       if (opt.tunnel) {
@@ -287,6 +292,21 @@
       for (let i = e.i0; i <= e.i1; i++) if ((FL[i] & 2) && !(FL[i - 1] & 2 && FL[i + 1] & 2)) for (let k = -8; k <= 8; k++) { const q = i + k; if (q >= e.i0 && q <= e.i1 && !(FL[q] & 2)) FL[q] |= 4; }
     }
     Object.assign(M, { nodes, edges, N, X, Z, Y, RAW, TX, TZ, S, K, E, FL, SF });
+    // перекрёстки, город, тротуары - одни правила для физики и рисования
+    M.junctionR = junctionRadius;
+    const juncList = Object.keys(nodes).map((k) => ({ k, x: nodes[k].x, z: nodes[k].z, y: nodes[k].y, r: junctionRadius(k) + 0.6 })).filter((j) => j.r > 0.6);
+    function junctionAt(x, z, yRef) { for (const j of juncList) if (Math.abs(x - j.x) < j.r && Math.abs(z - j.z) < j.r && Math.hypot(x - j.x, z - j.z) < j.r && (yRef === undefined || Math.abs(yRef - j.y) < 3)) return j; return null; }
+    M.junctionAt = junctionAt;
+    M.inJunction = function (i) {
+      const e = edges[E[i]];
+      for (const nk of [e.a, e.b]) { const r = junctionRadius(nk); if (r && Math.hypot(nodes[nk].x - X[i], nodes[nk].z - Z[i]) < r - 0.5) return true; }
+      return false;
+    };
+    const urbanFlag = new Uint8Array(N);
+    M.urban = (i) => { let v = urbanFlag[i]; if (!v) { v = urbanFlag[i] = R[regionMix(X[i], Z[i], mixTmp).i].biome === 'concrete' ? 2 : 1; } return v === 2; };
+    // тротуара нет и там, где к дороге примыкает подъезд фестиваля
+    M.sidewalkAt = (i) => !(FL[i] & 3) && M.urban(i) && !M.inJunction(i) && !(FEST && FEST.drive && Math.hypot(X[i] - FEST.drive.ax, Z[i] - FEST.drive.az) < 9);
+    M.SIDEWALK = { w: 3, top: 0.18 };
 
     // --- сетка для быстрого поиска ближайшей дороги ---
     const CELL = 32, grid = new Map();
@@ -298,9 +318,10 @@
       }
     }
     // Ближайший участок дороги в радиусе ~32 м (или null).
-    function nearestRoad(x, z, out) {
+    // yRef (высота машины, если есть): на развязке, где дороги идут одна над другой, берётся дорога своего уровня
+    function nearestRoad(x, z, out, yRef) {
       const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
-      let best = 1e18, bi = -1, bt = 0;
+      let best = 1e18, bi = -1, bt = 0, bestH = 1e18, hi = -1, ht = 0;
       for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) {
         const a = grid.get(key(cx + ox, cz + oz)); if (!a) continue;
         for (let q = 0; q < a.length; q++) {
@@ -308,9 +329,11 @@
           let t = ((x - ax) * bx + (z - az) * bz) / (bx * bx + bz * bz); t = t < 0 ? 0 : t > 1 ? 1 : t;
           const px = ax + bx * t - x, pz = az + bz * t - z, dd = px * px + pz * pz;
           if (dd < best) { best = dd; bi = i; bt = t; }
+          if (yRef !== undefined && dd < bestH && Math.abs(Y[i] + (Y[i + 1] - Y[i]) * t - yRef) < 3.5) { bestH = dd; hi = i; ht = t; }
         }
       }
       if (bi < 0) return null;
+      if (hi >= 0 && hi !== bi && Math.sqrt(bestH) < edges[E[hi]].hw + 4) { bi = hi; bt = ht; best = bestH; }
       out = out || {};
       const e = edges[E[bi]], j = bi + 1;
       out.i = bi; out.t = bt; out.edge = e; out.hw = e.hw; out.surf = SF[bt < 0.5 ? bi : j]; out.d = Math.sqrt(best);
@@ -325,14 +348,36 @@
     M.nearestRoad = nearestRoad;
     const nrTmp = {};
     // Рельеф с дорогами: у дороги земля ровняется под полотно, у тоннеля - прорезь, под мостом - как есть.
+    let FEST = null;                          // площадка фестиваля: { x, z, y, r }
     function terrainHeight(x, z) {
+      if (FEST) {
+        const d = Math.hypot(x - FEST.x, z - FEST.z); if (d < FEST.r + 18) return lerp(FEST.y + 0.05, terrainHeight0(x, z), smooth(FEST.r + 1, FEST.r + 18, d));
+        const dv = driveAt(x, z); if (dv) return lerp(dv.y - 0.35, terrainHeight0(x, z), smooth(dv.w / 2 + 1, dv.w / 2 + 14, dv.lat));
+      }
+      return terrainHeight0(x, z);
+    }
+    // подъезд: t - доля пути от дороги к площадке, lat - расстояние от оси (null - далеко)
+    const dvTmp = {};
+    function driveAt(x, z) {
+      const D = FEST && FEST.drive; if (!D) return null;
+      if (x < Math.min(D.ax, D.bx) - D.w - 16 || x > Math.max(D.ax, D.bx) + D.w + 16 || z < Math.min(D.az, D.bz) - D.w - 16 || z > Math.max(D.az, D.bz) + D.w + 16) return null;
+      const ux = D.bx - D.ax, uz = D.bz - D.az, L = Math.hypot(ux, uz), t = ((x - D.ax) * ux + (z - D.az) * uz) / (L * L);
+      if (t < -0.02 || t > 1.02) return null;
+      const tc = t < 0 ? 0 : t > 1 ? 1 : t, lat = Math.hypot(x - (D.ax + ux * tc), z - (D.az + uz * tc));
+      if (lat > D.w / 2 + 14) return null;
+      dvTmp.t = tc; dvTmp.lat = lat; dvTmp.y = lerp(D.ay, D.by, tc); dvTmp.w = D.w; return dvTmp;
+    }
+    function terrainHeight0(x, z) {
       const raw = rawHeight(x, z), q = nearestRoad(x, z, nrTmp);
       if (!q) return raw;
       const hw = q.hw;
       if (q.bridge) return q.d < hw + 1.5 && raw > q.y - 0.3 ? q.y - 0.3 : raw;
       if (q.tunnel) { const cover = Math.max(raw, q.y + TUNNEL_COVER); return lerp(cover, raw, smooth(hw + 6, hw + 18, q.d)); }
-      const t = smooth(hw + 1.5, hw + 26, q.d);
-      return lerp(q.y - 0.3, raw, t);
+      // под тротуаром рельеф чуть ниже его верха и ниже полотна (полотно +0.06, тротуар +0.18): ничего не торчит
+      const walk = M.sidewalkAt && M.sidewalkAt(q.i);
+      if (walk && q.d >= hw && q.d < hw + 3.5) return q.y + 0.04;
+      const t = smooth(hw + (walk ? 3.5 : 1.5), hw + 26, q.d);
+      return lerp(walk && q.d >= hw ? q.y + 0.04 : q.y - 0.3, raw, t);
     }
     M.terrainHeight = terrainHeight;
     M.surfAt = (x, z) => BIOME[R[regionMix(x, z, mixTmp).i].biome].surf;
@@ -355,16 +400,22 @@
     const nodeRoad = (k) => { const nd = nodes[k], e = edges[nd.edges[0]], i = e.a === k ? e.i0 + 18 : e.i1 - 18; return i; };
     // фестиваль: ровная площадка у узла F, не ближе 40 м ни к одной дороге
     let fp = null, fi = nodeRoad('F');
-    for (let r = 50; r <= 170 && !fp; r += 10) {
+    for (let r = 80; r <= 300 && !fp; r += 10) {
       for (let a = 0; a < 24 && !fp; a++) {
         const x = nodes.F.x + Math.cos(a / 24 * 6.283) * r, z = nodes.F.z + Math.sin(a / 24 * 6.283) * r;
         let dmin = 1e9; for (let k = 0; k < N; k += 2) dmin = Math.min(dmin, (X[k] - x) ** 2 + (Z[k] - z) ** 2);
-        if (Math.sqrt(dmin) > 40 && rawHeight(x, z) > WATER + 1) fp = { x, z };
+        if (Math.sqrt(dmin) > 72 && rawHeight(x, z) > WATER + 1) fp = { x, z };
       }
     }
-    if (!fp) fp = roadside(fi, 1, edges[E[fi]].hw + 42);
+    if (!fp) fp = roadside(fi, 1, edges[E[fi]].hw + 74);
     { let best = 1e18; for (let k = 0; k < N; k++) { const d = (X[k] - fp.x) ** 2 + (Z[k] - fp.z) ** 2; if (d < best) { best = d; fi = k; } } }
     P.push({ id: 'fest', type: 'fest', name: 'Фестиваль', x: fp.x, z: fp.z, i: fi, open: true });
+    FEST = { x: fp.x, z: fp.z, y: rawHeight(fp.x, fp.z), r: 40, rot: Math.atan2(X[fi] - fp.x, Z[fi] - fp.z) };
+    M.fest = FEST;
+    {
+      const hw = edges[E[fi]].hw, ux = FEST.x - X[fi], uz = FEST.z - Z[fi], L = Math.hypot(ux, uz);
+      FEST.drive = { ax: X[fi] + ux / L * (hw - 0.5), az: Z[fi] + uz / L * (hw - 0.5), ay: Y[fi], bx: FEST.x - ux / L * (FEST.r - 1.5), bz: FEST.z - uz / L * (FEST.r - 1.5), by: FEST.y + 0.15, w: 8 };
+    }
     R.forEach((r) => {
       if (!r.track) return;
       let bestK = null, bd = 1e18;
@@ -430,11 +481,12 @@
     M.pointById = (pid) => P.find((p) => p.id === pid);
 
     // --- земля для физики: дорога, рельеф, рампы ---
+    let rampHit = null;                       // рампа под последней точкой (её направление - для въезда)
     function rampHeight(x, z) {
-      let y = -1e9;
+      let y = -1e9; rampHit = null;
       for (const r of ramps) {
         const dx = x - r.x, dz = z - r.z, u = dx * r.tx + dz * r.tz, v = dx * -r.tz + dz * r.tx;
-        if (u >= 0 && u <= r.len && Math.abs(v) <= r.w / 2) y = Math.max(y, r.y0 + r.h * (u / r.len));
+        if (u >= 0 && u <= r.len && Math.abs(v) <= r.w / 2) { const h = r.y0 + r.h * (u / r.len); if (h > y) { y = h; rampHit = r; } }
       }
       return y;
     }
@@ -443,15 +495,20 @@
     // yRef - высота машины: под мостом полотно моста не земля, над тоннелем по горе - тоже.
     M.groundAt = function (x, z, out, yRef) {
       out = out || {};
-      const q = nearestRoad(x, z, gq);
-      let road = !!q && q.d <= q.hw + 0.6;
+      const q = nearestRoad(x, z, gq, yRef);
+      let road = !!q && q.d <= q.hw + 0.05;                 // полотно - ровно до нарисованного края
       if (q && yRef !== undefined) {
         if (road && q.bridge && yRef < q.y - 1.5) road = false;
         if (q.tunnel) road = yRef <= q.y + 4 && q.d <= q.hw + 2;
       }
       if (road) { out.y = q.y; out.surf = q.surf; out.onRoad = true; out.q = q; } else { out.y = terrainHeight(x, z); out.surf = M.surfAt(x, z); out.onRoad = false; out.q = q; }
+      out.walk = false;
+      if (!out.onRoad) { const nd = junctionAt(x, z, yRef); if (nd) { out.y = nd.y; out.surf = 'asphalt'; out.onRoad = true; } }
+      if (q && q.d > q.hw && q.d <= q.hw + M.SIDEWALK.w && !q.tunnel && !q.bridge && M.sidewalkAt(q.i) && M.sidewalkAt(q.i + 1) && (yRef === undefined || yRef > q.y - 1.5)) { out.y = q.y + M.SIDEWALK.top; out.surf = 'asphalt'; out.onRoad = true; out.walk = true; }
+      if (FEST && Math.abs(x - FEST.x) < FEST.r && Math.abs(z - FEST.z) < FEST.r && Math.hypot(x - FEST.x, z - FEST.z) < FEST.r) { out.y = FEST.y + 0.15; out.surf = 'asphalt'; out.onRoad = true; }
+      else if (FEST) { const dv = driveAt(x, z); if (dv && dv.lat <= dv.w / 2 && (!road || dv.y + 0.1 > out.y)) { out.y = dv.y + 0.1; out.surf = 'asphalt'; out.onRoad = true; } }
       const ry = rampHeight(x, z);
-      if (ry > out.y) { out.y = ry; out.onRoad = true; out.surf = 'asphalt'; out.ramp = true; } else out.ramp = false;
+      if (ry > out.y) { out.y = ry; out.onRoad = true; out.surf = 'asphalt'; out.ramp = rampHit; } else out.ramp = false;
       out.water = out.y < WATER - 0.2;
       return out;
     };
@@ -465,7 +522,7 @@
       const x0 = cx * CHUNK, z0 = cz * CHUNK;
       const reg = M.regionAt(x0 + CHUNK / 2, z0 + CHUNK / 2);
       const decor = reg.decor || [];
-      const keepOut = (x, z, extra) => { for (const pt of P) { const rr = pt.type === 'fest' ? 62 : pt.type === 'board' ? 4 : pt.type === 'jump' ? 16 : 12; if (Math.abs(pt.x - x) < rr + extra && Math.abs(pt.z - z) < rr + extra && Math.hypot(pt.x - x, pt.z - z) < rr + extra) return true; } return false; };
+      const keepOut = (x, z, extra) => { const dv = driveAt(x, z); if (dv && dv.lat < dv.w / 2 + 3 + extra) return true; for (const pt of P) { const rr = pt.type === 'fest' ? 62 : pt.type === 'board' ? 4 : pt.type === 'jump' ? 16 : 12; if (Math.abs(pt.x - x) < rr + extra && Math.abs(pt.z - z) < rr + extra && Math.hypot(pt.x - x, pt.z - z) < rr + extra) return true; } return false; };
       const dens = { tree: 22, pine: reg.biome === 'forest' ? 34 : 16, snowpine: 20, palm: 10, cactus: 12, rock: 7 };
       for (const type of decor) {
         if (!(type in dens)) continue;
@@ -535,6 +592,196 @@
       return res;
     };
 
+
+    // ======================= ТВЁРДЫЕ ПРЕДМЕТЫ =======================
+    // Один список на всё: физика машин, камера, место появления и рисование берут предметы отсюда.
+    // Запись: { t: 'box', x, z, y0, y1, w, d, rot } или { t: 'cyl', x, z, y0, y1, r }; kind - что это, obj - общий номер у частей
+    // составного предмета. Коробка: w - поперёк (ось cos rot, -sin rot), d - вдоль (ось sin rot, cos rot), как у домов.
+    // Не твёрдое (флаги наверху, надписи, свет, разметка, земля) в список не попадает - в рисунке помечено ghost.
+    const PROP_PARTS = {                      // [смещение x, z, радиус, низ, верх] в долях масштаба предмета
+      // низ - ниже земли: на склоне нижний край предмета уходит под рельеф
+      tree: [[0, 0, 0.38, -1.5, 3.1], [0, 0, 2.6, 2.3, 6.9]],
+      pine: [[0, 0, 0.34, -1.5, 2.5], [0, 0, 2.3, 2.0, 9.4]],
+      snowpine: [[0, 0, 0.34, -1.5, 2.5], [0, 0, 2.3, 2.0, 8.7]],
+      palm: [[0.36, 0, 0.36, -1.5, 8.3], [0.9, 0, 3.0, 7.4, 9.0]],
+      cactus: [[0, 0, 0.45, -1.5, 4.1], [0.7, 0, 0.3, 1.5, 3.3], [-0.65, 0, 0.3, 1.2, 2.6], [0.35, 0, 0.42, 1.45, 1.95], [-0.3, 0, 0.38, 1.15, 1.65]],
+      rock: [[0.2, 0.1, 2.05, -1.5, 1.8]],
+    };
+    M.PROP_PARTS = PROP_PARTS;
+    let objN = 0;
+    const cyl = (x, z, r, y0, y1, kind, obj) => ({ t: 'cyl', x, z, r, y0, y1, kind, obj, br: r });
+    const box = (x, z, w, d, rot, y0, y1, kind, obj) => ({ t: 'box', x, z, w, d, rot, y0, y1, kind, obj, br: Math.hypot(w, d) / 2 });
+    // фонари: у шоссе через 60 м, по очереди с разных сторон; не в тоннелях и не на перекрёстках
+    const lampCache = new Map();
+    M.chunkLamps = function (cx, cz) {
+      const k = key(cx, cz); if (lampCache.has(k)) return lampCache.get(k);
+      const out = [];
+      for (const i of M.roadSamplesIn(cx, cz, 0)) {
+        const e = edges[E[i]];
+        if (!e.T.lamps || !(S[i] % 60 < e.step) || (FL[i] & 2) || M.inJunction(i)) continue;
+        const sd = (Math.floor(S[i] / 60) % 2) ? 1 : -1, nx = -TZ[i], nz = TX[i], hw = e.hw;
+        out.push({ i, sd, hw, x: X[i] + nx * sd * (hw + 0.8), z: Z[i] + nz * sd * (hw + 0.8), y: Y[i], rot: Math.atan2(-nx * sd, -nz * sd) });
+      }
+      lampCache.set(k, out); return out;
+    };
+    // опоры мостов: через 26 м, от земли (или дна у воды) до низа плиты
+    const pillars = new Map();
+    for (const e of edges) for (let i = e.i0; i <= e.i1; i++) {
+      if (!(FL[i] & 1) || !(S[i] % 26 < e.step)) continue;
+      const ground = Math.max(RAW[i], WATER - 6), top = Y[i] - 1.4;
+      if (top - ground <= 1) continue;
+      const kk = key(Math.floor(X[i] / CHUNK), Math.floor(Z[i] / CHUNK));
+      if (!pillars.has(kk)) pillars.set(kk, []);
+      pillars.get(kk).push({ i, x: X[i], z: Z[i], y0: ground, y1: top, rot: Math.atan2(TX[i], TZ[i]) });
+    }
+    M.chunkPillars = (cx, cz) => pillars.get(key(cx, cz)) || [];
+    // порталы тоннелей: две опоры по бокам проезда и перемычка до верха горы
+    const portals = new Map();
+    for (const e of edges) for (let i = e.i0; i <= e.i1; i++) {
+      if (!(FL[i] & 2)) continue;
+      const first = !(FL[i - 1] & 2), last = !(FL[i + 1] & 2);
+      if (!((first && i > e.i0) || (last && i < e.i1))) continue;
+      const hw = e.hw, y = Y[i], top = Math.max(terrainHeight(X[i], Z[i]), y + TUNNEL_COVER) + 0.6, nx = -TZ[i], nz = TX[i], rot = Math.atan2(TX[i], TZ[i]), side = 13, thick = 2.2;
+      const parts = [];
+      for (const sd of [-1, 1]) { const off = sd * (hw + 1 + side / 2); parts.push({ x: X[i] + nx * off, z: Z[i] + nz * off, w: side, d: thick, rot, y0: y - 3, y1: top }); }
+      parts.push({ x: X[i], z: Z[i], w: 2 * (hw + 1) + 0.2, d: thick, rot, y0: y + 7, y1: top });
+      const kk = key(Math.floor(X[i] / CHUNK), Math.floor(Z[i] / CHUNK));
+      if (!portals.has(kk)) portals.set(kk, []);
+      portals.get(kk).push({ i, parts });
+    }
+    M.chunkPortals = (cx, cz) => portals.get(key(cx, cz)) || [];
+    // фестиваль: сцена, экран на опорах, шатры; местные координаты повёрнуты к дороге (как у рисунка)
+    const FEST_PARTS = [
+      { part: 'stage', t: 'box', x: 0, z: -12, w: 26, d: 14, y0: 0, y1: 1.2 },
+      { part: 'screen', t: 'box', x: 0, z: -17.85, w: 22, d: 0.3, y0: 4.75, y1: 10.25 },
+      { part: 'post', t: 'box', x: -11.5, z: -17.9, w: 0.5, d: 0.5, y0: 0, y1: 10.5 },
+      { part: 'post', t: 'box', x: 11.5, z: -17.9, w: 0.5, d: 0.5, y0: 0, y1: 10.5 },
+    ];
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 7 - 0.5) * Math.PI * 1.2 + Math.PI;
+      FEST_PARTS.push({ part: 'tent', t: 'cyl', x: Math.sin(a) * 30, z: Math.cos(a) * 30, r: 4.5, y0: 0, y1: 5, k });
+    }
+    M.FEST_PARTS = FEST_PARTS;
+    const pointSolids = new Map();
+    const addPoint = (c) => { const kk = key(Math.floor(c.x / CHUNK), Math.floor(c.z / CHUNK)); if (!pointSolids.has(kk)) pointSolids.set(kk, []); pointSolids.get(kk).push(c); };
+    {
+      const F = FEST, cs = Math.cos(F.rot), sn = Math.sin(F.rot), base = F.y + 0.15;
+      for (const p of FEST_PARTS) {
+        const x = F.x + p.x * cs + p.z * sn, z = F.z - p.x * sn + p.z * cs, obj = 'fest-' + (objN++);
+        if (p.t === 'box') addPoint(box(x, z, p.w, p.d, F.rot, base + p.y0, base + p.y1, 'fest-' + p.part, obj));
+        else addPoint(cyl(x, z, p.r, base + p.y0, base + p.y1, 'fest-' + p.part, obj));
+      }
+    }
+    for (const p of P) {
+      if (p.type === 'radar') addPoint(cyl(p.x, p.z, 0.22, p.y, p.y + 6.6, 'radar', 'radar-' + (objN++)));
+      if (p.type === 'drift') for (const i of [p.i0, p.i1]) {
+        const hw = edges[E[i]].hw, nx = -TZ[i], nz = TX[i], obj = 'arch-' + (objN++);
+        for (const sd of [-1, 1]) addPoint(cyl(X[i] + nx * sd * (hw + 1), Z[i] + nz * sd * (hw + 1), 0.5, Y[i], Y[i] + 2.2, 'arch', obj));
+      }
+    }
+    // все твёрдые предметы куска: декор (деревья, камни, дома, контейнеры), фонари, опоры, порталы, точки мира
+    const solidCache = new Map();
+    M.solidsIn = function (cx, cz) {
+      const k = key(cx, cz); let out = solidCache.get(k); if (out) return out;
+      out = [];
+      for (const d of M.chunkDecor(cx, cz)) {
+        const obj = d.type + '-' + (objN++);
+        if (d.box) {
+          const w = d.type === 'container' ? 2.5 : d.w, dd = d.type === 'container' ? 6.1 : d.d;
+          out.push(box(d.x, d.z, w, dd, d.rot, d.y - 3, d.y - 0.15 + d.h, d.type, obj));           // фундамент: на склоне дом уходит в землю
+        } else {
+          const cs = Math.cos(d.rot), sn = Math.sin(d.rot);
+          for (const [ox, oz, r, y0, y1] of PROP_PARTS[d.type]) out.push(cyl(d.x + (ox * cs + oz * sn) * d.s, d.z + (-ox * sn + oz * cs) * d.s, r * d.s, d.y - 0.15 + y0 * d.s, d.y - 0.15 + y1 * d.s, d.type, obj));
+        }
+      }
+      for (const L of M.chunkLamps(cx, cz)) out.push(cyl(L.x, L.z, 0.2, L.y, L.y + 8.1, 'lamp', 'lamp-' + (objN++)));
+      for (const p of M.chunkPillars(cx, cz)) out.push(box(p.x, p.z, 1.4, 1.4, p.rot, p.y0, p.y1, 'pillar', 'pillar-' + (objN++)));
+      for (const pt of M.chunkPortals(cx, cz)) { const obj = 'portal-' + (objN++); for (const b of pt.parts) out.push(box(b.x, b.z, b.w, b.d, b.rot, b.y0, b.y1, 'portal', obj)); }
+      for (const c of pointSolids.get(k) || []) out.push(c);
+      solidCache.set(k, out);
+      if (solidCache.size > 400) solidCache.delete(solidCache.keys().next().value);
+      return out;
+    };
+    // предметы, чья коробка в плане ближе rad к точке (соседние куски тоже: большие предметы выступают за край)
+    M.solidsNear = function (x, z, rad, out) {
+      out = out || []; out.length = 0;
+      const c0x = Math.floor((x - rad - 24) / CHUNK), c1x = Math.floor((x + rad + 24) / CHUNK), c0z = Math.floor((z - rad - 24) / CHUNK), c1z = Math.floor((z + rad + 24) / CHUNK);
+      for (let cx = c0x; cx <= c1x; cx++) for (let cz = c0z; cz <= c1z; cz++) {
+        for (const c of M.solidsIn(cx, cz)) if (Math.abs(c.x - x) < rad + c.br && Math.abs(c.z - z) < rad + c.br) out.push(c);
+      }
+      return out;
+    };
+    const solidTmp = [];
+    // точка внутри предмета (с запасом pad) - для проверок и камеры
+    M.solidAt = function (x, y, z, pad) {
+      pad = pad || 0;
+      for (const c of M.solidsNear(x, z, pad + 1, solidTmp)) {
+        if (y < c.y0 - pad || y > c.y1 + pad) continue;
+        if (c.t === 'cyl') { if (Math.hypot(x - c.x, z - c.z) < c.r + pad) return c; }
+        else { const dx = x - c.x, dz = z - c.z, cs = Math.cos(c.rot), sn = Math.sin(c.rot), lx = dx * cs - dz * sn, lz = dx * sn + dz * cs; if (Math.abs(lx) < c.w / 2 + pad && Math.abs(lz) < c.d / 2 + pad) return c; }
+      }
+      return null;
+    };
+    // Отрезок a -> b для шара радиуса rad: доля пути до первого касания (1 - свободно).
+    // Предметы из списка, земля (с высотой машины yRef: под мостом и в тоннеле - своя), свод и стены тоннеля, плита моста снизу.
+    const sweepTmp = [], swq = {}, swg = {};
+    M.sweep = function (ax, ay, az, bx, by, bz, rad, yRef) {
+      const dx = bx - ax, dy = by - ay, dz = bz - az, len = Math.hypot(dx, dy, dz);
+      if (len < 1e-6) return 1;
+      let tMin = 1;
+      for (const c of M.solidsNear((ax + bx) / 2, (az + bz) / 2, len / 2 + rad + 1, sweepTmp)) {
+        const y0 = c.y0 - rad, y1 = c.y1 + rad;
+        let t0 = 0, t1 = 1;
+        if (c.t === 'cyl') {
+          const ox = ax - c.x, oz = az - c.z, R2 = (c.r + rad) * (c.r + rad), A = dx * dx + dz * dz, B = 2 * (ox * dx + oz * dz), Cq = ox * ox + oz * oz - R2;
+          if (Cq <= 0 && ay > y0 && ay < y1) continue;      // начало уже внутри (у самой машины) - этот предмет не мешает
+          if (Cq > 0) {
+            if (A < 1e-9) continue;
+            const disc = B * B - 4 * A * Cq; if (disc < 0) continue;
+            const s = Math.sqrt(disc); t0 = (-B - s) / (2 * A); t1 = (-B + s) / (2 * A);
+          }
+        } else {
+          const cs = Math.cos(c.rot), sn = Math.sin(c.rot), ox = ax - c.x, oz = az - c.z;
+          const lx = ox * cs - oz * sn, lz = ox * sn + oz * cs, ldx = dx * cs - dz * sn, ldz = dx * sn + dz * cs, hx = c.w / 2 + rad, hz = c.d / 2 + rad;
+          if (Math.abs(lx) < hx && Math.abs(lz) < hz && ay > y0 && ay < y1) continue;
+          const sl = [[lx, ldx, hx], [lz, ldz, hz]];
+          for (let q = 0; q < 2; q++) {
+            const o = sl[q][0], d = sl[q][1], h = sl[q][2];
+            if (Math.abs(d) < 1e-9) { if (Math.abs(o) >= h) { t0 = 2; break; } continue; }
+            let ta = (-h - o) / d, tb = (h - o) / d; if (ta > tb) { const w = ta; ta = tb; tb = w; }
+            t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
+          }
+        }
+        if (Math.abs(dy) < 1e-9) { if (ay < y0 || ay > y1) continue; }
+        else { let ta = (y0 - ay) / dy, tb = (y1 - ay) / dy; if (ta > tb) { const w = ta; ta = tb; tb = w; } t0 = Math.max(t0, ta); t1 = Math.min(t1, tb); }
+        if (t0 < t1 && t0 >= 0 && t0 < tMin) tMin = t0;
+      }
+      // земля, тоннель, мост - шагами по 0.4 м
+      const n = Math.max(2, Math.ceil(len / 0.4));
+      for (let s = 1; s <= n; s++) {
+        const t = s / n; if (t > tMin) break;
+        const x = ax + dx * t, y = ay + dy * t, z = az + dz * t;
+        const g = M.groundAt(x, z, swg, yRef === undefined ? y : yRef);
+        let hit = y < g.y + rad;
+        const q = g.q;
+        if (!hit && q && q.tunnel && Math.abs(y - q.y) < 9 && q.d < q.hw + 14) hit = y > q.y + 7 - rad || q.d > q.hw + 1 - rad;
+        if (!hit && q && q.bridge && q.d < q.hw + 0.5 && y < q.y + rad && y > q.y - 1.4 - rad) hit = true;
+        if (hit) { tMin = Math.min(tMin, (s - 1) / n); break; }
+      }
+      return tMin;
+    };
+    // Свободно ли место для машины (кузов с запасом margin): предметы и другие машины.
+    M.carFits = function (car, others, margin) {
+      const m = margin === undefined ? 0.3 : margin, st = { len: (car.st.len || 4.3) + 2 * m, wid: (car.st.wid || 1.8) + 2 * m, mass: car.st.mass, I: car.st.I };
+      const probe = { x: car.x, z: car.z, h: car.h, st }, k = {};
+      for (const c of M.solidsNear(car.x, car.z, 6, solidTmp)) {
+        if (c.y1 < car.y + 0.12 || c.y0 > car.y + 1.5) continue;
+        if (c.t === 'cyl' ? C.carCircleContact(probe, c.x, c.z, c.r, k) : C.carBoxContact(probe, c.x, c.z, c.w, c.d, c.rot, k)) return false;
+      }
+      for (const o of others || []) if (o !== car && Math.abs(o.y - car.y) < 2.5 && Math.abs(o.x - car.x) < 8 && Math.abs(o.z - car.z) < 8 && C.carCarContact(probe, o, k)) return false;
+      return true;
+    };
+
     // граф: соседи узлов
     M.adj = {};
     for (const e of edges) { (M.adj[e.a] = M.adj[e.a] || []).push(e.b); (M.adj[e.b] = M.adj[e.b] || []).push(e.a); }
@@ -596,46 +843,26 @@
 
   const weatherOf = (name) => (Object.prototype.hasOwnProperty.call(WEATHER, name) ? WEATHER[name] : WEATHER.clear);
 
-  function collidePair(a, b) {
-    for (let ka = -1.15; ka <= 1.15; ka += 2.3) {
-      for (let kb = -1.15; kb <= 1.15; kb += 2.3) {
-        const ax = a.x + Math.sin(a.h) * ka, az = a.z + Math.cos(a.h) * ka, bx = b.x + Math.sin(b.h) * kb, bz = b.z + Math.cos(b.h) * kb;
-        let dx = bx - ax, dz = bz - az; const d = Math.hypot(dx, dz);
-        if (d >= 2 || d < 1e-6 || Math.abs(a.y - b.y) > 2.5) continue;
-        dx /= d; dz /= d;
-        const ima = 1 / a.st.mass, imb = 1 / b.st.mass, pen = 2 - d;
-        a.x -= dx * pen * ima / (ima + imb); a.z -= dz * pen * ima / (ima + imb); b.x += dx * pen * imb / (ima + imb); b.z += dz * pen * imb / (ima + imb);
-        const rax = -Math.cos(a.h), raz = Math.sin(a.h), rbx = -Math.cos(b.h), rbz = Math.sin(b.h);
-        const vrel = (b.vx + b.w * kb * rbx - a.vx - a.w * ka * rax) * dx + (b.vz + b.w * kb * rbz - a.vz - a.w * ka * raz) * dz;
-        if (vrel >= 0) continue;
-        const la = ka * (rax * dx + raz * dz), lb = kb * (rbx * dx + rbz * dz);
-        const J = -1.3 * vrel / (ima + imb + la * la / a.st.I + lb * lb / b.st.I);
-        b.vx += J * imb * dx; b.vz += J * imb * dz; b.w += J * lb / b.st.I; a.vx -= J * ima * dx; a.vz -= J * ima * dz; a.w -= J * la / a.st.I;
-        a.hit = Math.max(a.hit, -vrel); b.hit = Math.max(b.hit, -vrel);
+  // Машина против машины и против твёрдых предметов: кузов - прямоугольник по размерам машины (core.js).
+  function collidePair(a, b) { if (Math.abs(a.y - b.y) > 2.5) return; C.collideCarPair(a, b, 0.3); }
+  const CAR_H = 1.5;                               // высота кузова для столкновений с предметами
+  const hitTmp = {};
+  // Все предметы списка у машины: вытолкнуть по кратчайшей оси, погасить скорость. true - было касание.
+  function collideSolids(c, list) {
+    let hit = false;
+    for (let pass = 0; pass < 2; pass++) {
+      let any = false;
+      for (let n = 0; n < list.length; n++) {
+        const d = list[n];
+        if (d.y1 < c.y + 0.12 || d.y0 > c.y + CAR_H) continue;
+        const k = d.t === 'cyl' ? C.carCircleContact(c, d.x, d.z, d.r, hitTmp) : C.carBoxContact(c, d.x, d.z, d.w, d.d, d.rot, hitTmp);
+        if (!k) continue;
+        C.resolveStatic(c, k, 0.3); any = true;
       }
+      if (!any) break;
+      hit = true;
     }
-  }
-
-  // Машина (два круга r=1 на носу и корме) против повёрнутой коробки дома или контейнера.
-  function collideBox(c, d) {
-    if (c.y > d.y + d.h || Math.abs(c.x - d.x) > d.r + 3.5 || Math.abs(c.z - d.z) > d.r + 3.5) return;
-    const cs = Math.cos(d.rot), sn = Math.sin(d.rot), hw = d.w / 2, hd = d.d / 2, rad = 1.0;
-    for (const k of [1.6, 0, -1.6]) {
-      const px = c.x + Math.sin(c.h) * k, pz = c.z + Math.cos(c.h) * k, dx = px - d.x, dz = pz - d.z;
-      const lx = dx * cs - dz * sn, lz = dx * sn + dz * cs;
-      let nlx, nlz, pen;
-      const cxl = Math.max(-hw, Math.min(hw, lx)), czl = Math.max(-hd, Math.min(hd, lz));
-      const ex = lx - cxl, ez = lz - czl, dist = Math.hypot(ex, ez);
-      if (dist > 1e-6) { if (dist >= rad) continue; nlx = ex / dist; nlz = ez / dist; pen = rad - dist; }
-      else {                                              // центр круга внутри - выталкиваем по ближней стороне
-        const ox = hw - Math.abs(lx), oz = hd - Math.abs(lz);
-        if (ox < oz) { nlx = Math.sign(lx) || 1; nlz = 0; pen = ox + rad; } else { nlx = 0; nlz = Math.sign(lz) || 1; pen = oz + rad; }
-      }
-      const nx = nlx * cs + nlz * sn, nz = -nlx * sn + nlz * cs;
-      c.x += nx * pen; c.z += nz * pen;
-      const vn = c.vx * nx + c.vz * nz;
-      if (vn < 0) { c.vx -= 1.3 * vn * nx; c.vz -= 1.3 * vn * nz; c.w *= 0.5; c.hit = Math.max(c.hit || 0, -vn); }
-    }
+    return hit;
   }
 
   class World {
@@ -664,9 +891,32 @@
       if (!q) { let best = 1e18; for (let k = 0; k < M.N; k += 5) { const d = (M.X[k] - x) ** 2 + (M.Z[k] - z) ** 2; if (d < best) { best = d; i = k; } } } else i = q.i;
       let h = Math.atan2(M.TX[i], M.TZ[i]);
       if (heading !== undefined && Math.cos(heading - h) < 0) h += Math.PI;
-      c.x = M.X[i]; c.z = M.Z[i]; c.h = h; c.vx = c.vz = c.w = 0; c.steer = 0; c.gear = 1;
-      c.y = M.groundAt(c.x, c.z).y; c.vy = 0; c.air = false; c.prevX = c.x; c.prevZ = c.z;
+      c.vx = c.vz = c.w = 0; c.steer = 0; c.gear = 1; c.vy = 0; c.air = false;
+      const spot = this.freeSpot(c, i, h);
+      c.x = spot.x; c.z = spot.z; c.h = spot.h; c.y = spot.y; c.prevX = c.x; c.prevZ = c.z; c.solidCache = null;
       this.events.push({ type: 'placed' });
+    }
+    // Ближайшее к выборке i свободное место на дороге: сначала сама точка, потом полосы, потом дальше вдоль дороги
+    // в обе стороны (до 400 м); нос - по ходу дороги в выбранную сторону.
+    freeSpot(c, i, h) {
+      const M = this.M, e = M.edges[M.E[i]], lane = e.hw * 0.45, dir = Math.cos(h - Math.atan2(M.TX[i], M.TZ[i])) >= 0 ? 0 : Math.PI;
+      const save = { x: c.x, z: c.z, h: c.h, y: c.y };
+      const tryAt = (j, off) => {
+        const nx = -M.TZ[j], nz = M.TX[j];
+        c.x = M.X[j] + nx * off; c.z = M.Z[j] + nz * off; c.h = Math.atan2(M.TX[j], M.TZ[j]) + dir;
+        c.y = M.groundAt(c.x, c.z, this.g, M.Y[j] + 0.5).y;
+        return M.carFits(c, this.cars, 0.3) ? { x: c.x, z: c.z, h: c.h, y: c.y } : null;
+      };
+      let found = null;
+      for (let k = 0; k <= 200 && !found; k += 2) {
+        for (const sg of k ? [1, -1] : [1]) {
+          const j = i + sg * k; if (j < e.i0 || j > e.i1) continue;
+          for (const off of [0, -lane, lane]) { found = tryAt(j, off); if (found) break; }
+          if (found) break;
+        }
+      }
+      if (!found) { c.x = save.x; c.z = save.z; c.h = save.h; c.y = save.y; found = tryAt(i, 0) || { x: M.X[i], z: M.Z[i], h: Math.atan2(M.TX[i], M.TZ[i]) + dir, y: M.Y[i] }; }
+      return found;
     }
     // Автопилот игрока (для проверок и снимков): едет по дорогам как соперник.
     setAutopilot(cruise) {
@@ -852,14 +1102,24 @@
 
     // Один шаг машины в мире: шины на земле, полёт в воздухе, земля по функции рельефа (не по сетке).
     stepCarWorld(c, dt) {
-      const M = this.M, g = this.g;
+      const M = this.M, g = this.g, x0 = c.x, z0 = c.z;
       const g0 = M.groundAt(c.x, c.z, g, c.y);
       c.surf = g0.surf; c.onRunoff = !g0.onRoad;
       c.gripMul = weatherOf(this.save.weather).grip[g0.surf] || 1;
       const yPrev = c.y;
       if (!c.air) C.stepCar(c, dt, g0.surf);
       else { c.x += c.vx * dt; c.z += c.vz * dt; c.h -= c.w * dt; c.w *= 1 - dt * 0.5; c.speed = Math.hypot(c.vx, c.vz); c.skidR = c.skidF = 0; }
-      const g1 = M.groundAt(c.x, c.z, g, c.y);
+      let g1 = M.groundAt(c.x, c.z, g, c.y);
+      // уступ выше, чем может взять колесо (бок рампы, обрыв вверх), - стенка, а не подъём
+      const moved = Math.hypot(c.x - x0, c.z - z0);
+      // въезд на рампу с её нижнего края по ходу - не уступ
+      const upRamp = g1.ramp && moved > 1e-6 && ((c.x - x0) * g1.ramp.tx + (c.z - z0) * g1.ramp.tz) / moved > 0.5;
+      if (!c.air && !upRamp && g1.y - yPrev > 0.45 + 0.6 * moved) {
+        const gx = c.x - x0, gz = c.z - z0, l = moved || 1, nx = -gx / l, nz = -gz / l;
+        c.x = x0; c.z = z0; const vn = c.vx * nx + c.vz * nz;
+        if (vn < 0) { c.vx -= 1.3 * vn * nx; c.vz -= 1.3 * vn * nz; c.w *= 0.5; c.hit = Math.max(c.hit || 0, -vn); }
+        g1 = M.groundAt(c.x, c.z, g, c.y);
+      }
       if (!c.air) {
         if (g1.y >= yPrev - 0.35) { c.vy = (g1.y - yPrev) / dt; c.y = g1.y; } else { c.air = true; c.airT = 0; c.vy = Math.min(c.vy || 0, 12); }
       }
@@ -873,27 +1133,31 @@
       // ограждения мостов и тоннелей
       const q = g1.q;
       if (q && (q.bridge || q.tunnel) && Math.abs(c.y - q.y) < 3) {
-        const lim = q.hw + 0.4 - 0.95;
-        if (Math.abs(q.lat) > lim && Math.abs(q.lat) < q.hw + 4) {
-          const sg = q.lat > 0 ? 1 : -1, onx = sg * q.nx, onz = sg * q.nz, pen = Math.abs(q.lat) - lim;
-          c.x -= onx * pen; c.z -= onz * pen;
-          const vn = c.vx * onx + c.vz * onz;
-          if (vn > 0) { c.vx -= 1.3 * vn * onx; c.vz -= 1.3 * vn * onz; c.w *= 0.6; c.hit = Math.max(c.hit || 0, vn); }
+        const wall = q.bridge ? q.hw + 0.2 : q.hw + 1, fx = Math.sin(c.h), fz = Math.cos(c.h);
+        const hl = (c.st.len || 4.3) / 2, hwc = (c.st.wid || 1.8) / 2, fn = fx * q.nx + fz * q.nz, rn = -fz * q.nx + fx * q.nz;
+        const ext = hl * Math.abs(fn) + hwc * Math.abs(rn), lim = wall - 0.05 - ext;
+        if (Math.abs(q.lat) > lim && Math.abs(q.lat) < q.hw + 6) {
+          const sg = q.lat > 0 ? 1 : -1;
+          // самый дальний к стенке угол кузова - точка удара
+          const px = c.x + fx * hl * (fn * sg >= 0 ? 1 : -1) + (-fz) * hwc * (rn * sg >= 0 ? 1 : -1), pz = c.z + fz * hl * (fn * sg >= 0 ? 1 : -1) + fx * hwc * (rn * sg >= 0 ? 1 : -1);
+          C.resolveStatic(c, { nx: -sg * q.nx, nz: -sg * q.nz, pen: Math.abs(q.lat) - lim, px, pz }, 0.3);
         }
       }
-      // деревья, камни, дома
-      const [cx, cz] = M.chunkOf(c.x, c.z);
-      for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) {
-        const lx = (c.x - cx * CHUNK), lz = (c.z - cz * CHUNK);
-        if ((ox === -1 && lx > 12) || (ox === 1 && lx < CHUNK - 12) || (oz === -1 && lz > 12) || (oz === 1 && lz < CHUNK - 12)) continue;
-        for (const d of M.chunkDecor(cx + ox, cz + oz)) {
-          if (!d.r) continue;
-          if (d.box) { collideBox(c, d); continue; }
-          const dx = c.x - d.x, dz = c.z - d.z, dist = Math.hypot(dx, dz), min = d.r + 1.0;
-          if (dist >= min || dist < 1e-6 || c.y > d.y + (d.h || 6)) continue;
-          const nx = dx / dist, nz = dz / dist; c.x += nx * (min - dist); c.z += nz * (min - dist);
-          const vn = c.vx * nx + c.vz * nz;
-          if (vn < 0) { c.vx -= 1.25 * vn * nx; c.vz -= 1.25 * vn * nz; c.w *= 0.5; c.hit = Math.max(c.hit || 0, -vn); }
+      // твёрдые предметы из общего списка; быстрая машина проходит путь шага по кусочкам не длиннее 0.3 м,
+      // чтобы не проскочить тонкий столб или ограду
+      const cache = c.solidCache || (c.solidCache = { x: 1e9, z: 1e9, rad: 0, list: [] });
+      const need = 6 + c.speed * 0.25;
+      if (Math.hypot(c.x - cache.x, c.z - cache.z) > cache.rad - need) { cache.rad = need + 14; cache.x = c.x; cache.z = c.z; M.solidsNear(c.x, c.z, cache.rad, cache.list); }
+      if (cache.list.length) {
+        const mx = c.x - x0, mz = c.z - z0, steps = Math.min(12, Math.max(1, Math.ceil(Math.hypot(mx, mz) / 0.3)));
+        if (steps === 1) collideSolids(c, cache.list);
+        else {
+          let bx = x0, bz = z0;
+          for (let k = 1; k <= steps; k++) {
+            c.x = bx + mx / steps; c.z = bz + mz / steps;
+            const hit = collideSolids(c, cache.list); bx = c.x; bz = c.z;
+            if (hit) break;
+          }
         }
       }
     }
@@ -934,7 +1198,7 @@
         if (pt.type === 'board') {
           if (!S.boards[pt.id] && d < 3.4 && Math.abs(p.y - pt.y) < 4) { S.boards[pt.id] = true; this.dirty = true; this.events.push({ type: 'board', point: pt, reward: 500 }); }
         } else if (pt.type === 'event' || pt.type === 'fest') {
-          if (d < (pt.type === 'fest' ? 70 : 28)) this.nearHub = pt;
+          if (d < (pt.type === 'fest' ? 100 : 28)) this.nearHub = pt;
         } else if (pt.type === 'radar') {
           const dc = Math.hypot(pt.cx - p.x, pt.cz - p.z);
           if (dc < 14) { if (!this.radarPass || this.radarPass.id !== pt.id) this.radarPass = { id: pt.id, v: 0 }; this.radarPass.v = Math.max(this.radarPass.v, p.speed * 3.6); }
