@@ -18,7 +18,7 @@
 
     // ---- зеркала: одна маленькая картинка вида назад, у каждого зеркала - своя часть ----
     const mirrorRT = new THREE.WebGLRenderTarget(320, 112);
-    const mirrorCam = new THREE.PerspectiveCamera(58, 320 / 112, 0.3, 900);
+    const mirrorCam = new THREE.PerspectiveCamera(58, 320 / 112, 0.3, 320);         // в зеркале - ближние 320 м: меньше вызовов рисования
     CK.mirrorRT = mirrorRT;
 
     // ---- приборы: холст с двумя шкалами, передачей, цифрами скорости и полосой нитро ----
@@ -220,12 +220,15 @@
 
     // Картинка для зеркал: вид назад с крыши, раз в три кадра, маленькая.
     CK.mirrors = function (renderer, scene, carRoot) {
-      if (!CK.group || (CK.frameN % 3) !== 0) return;
+      if (!CK.group || (CK.frameN % 4) !== 0) return;
       const c = CK.cab; carRoot.updateMatrixWorld(true);
       tv.set(0, c.yFT + 0.15, c.zFT - 0.2).applyMatrix4(carRoot.matrixWorld); mirrorCam.position.copy(tv);
       carRoot.getWorldQuaternion(mirrorCam.quaternion);                      // камера смотрит по -z, нос машины +z: назад
       mirrorCam.updateMatrixWorld();
+      // тени для зеркала не пересчитываются: карта теней уже готова для основного кадра
+      const sa = renderer.shadowMap.autoUpdate; renderer.shadowMap.autoUpdate = false;
       renderer.setRenderTarget(mirrorRT); renderer.render(scene, mirrorCam); renderer.setRenderTarget(null);
+      renderer.shadowMap.autoUpdate = sa;
     };
 
     // Салон поверх мира: глубина очищается, салон всегда ближе.

@@ -254,13 +254,13 @@
           const Fs = M.fest, fg = new THREE.Group(), base = 0.15;
           fg.position.set(Fs.x, Fs.y, Fs.z); fg.rotation.y = Fs.rot; group.add(fg); W.festGroup = fg;
           const mat = new THREE.MeshLambertMaterial({ color: 0xff5a1f }), mat2 = new THREE.MeshLambertMaterial({ color: 0x2a2c33 }), white = new THREE.MeshLambertMaterial({ color: 0xf4f4f4 });
-          const padMat = new THREE.MeshLambertMaterial({ color: 0x4a4c52 });
+          const padMat = new THREE.MeshLambertMaterial({ color: new THREE.Color(0x4a4c52).convertSRGBToLinear() });      // как асфальт, а не белая плита
           const pad = ghost(new THREE.Mesh(new THREE.CylinderGeometry(Fs.r, Fs.r, 0.5, 40), padMat), 'ground'); pad.position.y = base - 0.25; fg.add(pad);
           // подъезд от дороги: полоса по тем же высотам, что у физики
           const D = Fs.drive, dg = new THREE.BufferGeometry(), dp = [], di = [], ux = D.bx - D.ax, uz = D.bz - D.az, L = Math.hypot(ux, uz), nx = -uz / L, nz = ux / L, nseg = 12;
           for (let k = 0; k <= nseg; k++) { const t = k / nseg, x = D.ax + ux * t, z = D.az + uz * t, yy = D.ay + (D.by - D.ay) * t + 0.12; dp.push(x + nx * D.w / 2, yy, z + nz * D.w / 2, x - nx * D.w / 2, yy, z - nz * D.w / 2); if (k) { const q = (k - 1) * 2; di.push(q, q + 1, q + 2, q + 1, q + 3, q + 2); } }
           dg.setAttribute('position', new THREE.Float32BufferAttribute(dp, 3)); dg.setIndex(di); dg.computeVertexNormals();
-          group.add(ghost(new THREE.Mesh(dg, new THREE.MeshLambertMaterial({ color: 0x3a3c41, side: THREE.DoubleSide })), 'ground'));
+          group.add(ghost(new THREE.Mesh(dg, new THREE.MeshLambertMaterial({ color: new THREE.Color(0x3a3c41).convertSRGBToLinear(), side: THREE.DoubleSide })), 'ground'));
           for (const q of M.FEST_PARTS) {
             const h = q.y1 - q.y0, cy = base + (q.y0 + q.y1) / 2;
             if (q.part === 'stage') { const m = solid(new THREE.Mesh(new THREE.BoxGeometry(q.w, h, q.d), mat2), 'fest-stage'); m.position.set(q.x, cy, q.z); fg.add(m); }
