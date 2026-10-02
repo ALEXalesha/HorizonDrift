@@ -43,6 +43,17 @@
   function col(hex) { return new THREE.Color(hex); }
 
   // ---------- рендерер ----------
+  // Свободный взгляд: yaw - поворот (0 - вперёд/за машиной), pitch - вверх-вниз, zoom - дальность облёта, back - взгляд назад.
+  R.view = { yaw: 0, pitch: 0, zoom: 1, back: false };
+  R.VIEW = { cockpitYaw: 2.618, cockpitPitch: 1.047, orbitPitchMin: -0.1745, orbitPitchMax: 1.2217, zoomMin: 0.6, zoomMax: 1.9 };
+  // Камера облёта: от опоры за машиной по кругу (yaw), с наклоном (абсолютный угол над горизонтом) и дальностью.
+  R.orbitOffset = function (fx, fz, back, up, view, out) {
+    const base = Math.atan2(up, back), dist = Math.hypot(back, up) * view.zoom;
+    const yaw = view.back ? Math.PI : view.yaw, el = Math.max(R.VIEW.orbitPitchMin, Math.min(R.VIEW.orbitPitchMax, base + view.pitch));
+    const cs = Math.cos(yaw), sn = Math.sin(yaw), bx = -fx, bz = -fz, dx = bx * cs + bz * sn, dz = -bx * sn + bz * cs;
+    out.x = dx * Math.cos(el) * dist; out.z = dz * Math.cos(el) * dist; out.y = Math.sin(el) * dist; out.free = !!(view.yaw || view.pitch || view.back || view.zoom !== 1);
+    return out;
+  };
   R.init = function (canvas) {
     const r = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     r.outputEncoding = THREE.sRGBEncoding;
@@ -55,6 +66,7 @@
     R.resize();
     R.envMap = makeEnv();
     R.showroom = makeShowroom();
+    R.cockpit = window.DriftCockpit ? window.DriftCockpit.create(R, D) : null;
     return r;
   };
   R.resize = function () {
@@ -938,7 +950,9 @@
     const skids = skidSystem(s.particles === 'low' ? 800 : 2400); scene.add(skids.mesh);
     let snow = null;
     if (theme.snowfall) { snow = particleSystem(400); scene.add(snow.pts); }
-    R.race = { race, scene, sun, hemi, cars, arch, parts, skids, snow, water, headlight, theme, ctx, poles, cam: { x: 0, y: 0, z: 0, init: false, fov: 62, shake: 0 }, time: 0 };
+    // твёрдая обстановка трассы для штанги камеры: стены, рельеф, предметы (не небо, не вода, не полотно, не машины)
+    const carRoots = new Set(cars.map((c) => c.root)), solids = scene.children.filter((o) => (o.isMesh || o.isInstancedMesh) && o !== water && !carRoots.has(o) && !(o.material && o.material.side === THREE.BackSide) && !(o.material && o.material.transparent));
+    R.race = { race, scene, sun, hemi, cars, arch, parts, skids, snow, water, headlight, theme, ctx, poles, solids, cam: { x: 0, y: 0, z: 0, init: false, fov: 62, shake: 0 }, time: 0 };
     R.applySettings(s);
     await prog(1, 'Готово');
     return R.race;
@@ -957,7 +971,7 @@
   };
 
   // ======================= КАДР =======================
-  const tmpV = new THREE.Vector3();
+  const tmpV = new THREE.Vector3(), tmpV2 = new THREE.Vector3(), orbTmp = {}, armRay = new THREE.Raycaster();
   R.frame = function (dt, alpha, camMode, info) {
     if (!R.renderer) return;
     if (!R.race) { renderShowroom(dt); return; }
@@ -968,7 +982,7 @@
     race.cars.forEach((c, k) => {
       const cm = X.cars[k];
       if (c.out) { cm.root.visible = false; return; }
-      cm.root.visible = !(camMode === 'hood' && c === pl);
+      cm.root.visible = !((camMode === 'hood' || camMode === 'cockpit') && c === pl);
       const x = C.lerp(c.ix !== undefined ? c.ix : c.x, c.x, alpha), z = C.lerp(c.iz !== undefined ? c.iz : c.z, c.z, alpha);
       let h = c.h; if (c.ih !== undefined) { let dh = c.h - c.ih; if (dh > Math.PI) dh -= 2 * Math.PI; if (dh < -Math.PI) dh += 2 * Math.PI; h = c.ih + dh * alpha; }
       cm.root.position.set(x, c.y, z); cm.root.rotation.y = h;
@@ -1038,25 +1052,47 @@
     const vx = pl.vx, vz = pl.vz, sp = pl.speed;
     const far = D.DRAW_DIST[s.drawDist] || 1000;
     let fovT = 60 + Math.min(1, sp / 70) * 16 + (pl.nitroOn ? 6 : 0);
-    if (camMode === 'hood') {
+    const V = R.view, CK = R.cockpit;
+    if (camMode === 'cockpit' && CK && pc) {
+      CK.ensure(pl.carId || pl.id || 'iskra');
+      CK.update(dt, { car: pl, steerN: (pl.steer || 0) / (pl.st.steer || 0.6), kmh: C.toUnits(pl.speed, s.units), vmax: C.toUnits(pl.st.top, s.units), rpm: pl.rpm || 0, gear: pl.gear, nitro: pl.nitro, dark: X.theme.night ? 1 : 0, light: X.theme.night ? 0.25 : 1, rain: !!X.theme.rain, units: s.units });
+      const lim = R.VIEW, look = { yaw: V.back ? lim.cockpitYaw : Math.max(-lim.cockpitYaw, Math.min(lim.cockpitYaw, V.yaw)), pitch: Math.max(-lim.cockpitPitch, Math.min(lim.cockpitPitch, V.pitch)) };
+      st.fov += (72 + Math.min(1, sp / 70) * 6 - st.fov) * (1 - Math.exp(-dt * 3)); fovT = st.fov;
+      CK.place(cam, pc.root, look, st.fov); st.init = false; st.cockpit = true;
+    } else if (camMode === 'hood') {
+      if (CK) CK.off();
       cam.position.set(px + fx * 0.35, py + 1.25, pz + fz * 0.35);
-      tmpV.set(px + fx * 30, py + 1.0, pz + fz * 30); cam.lookAt(tmpV);
+      const hy = V.back ? Math.PI : Math.max(-R.VIEW.cockpitYaw, Math.min(R.VIEW.cockpitYaw, V.yaw)), lfx = Math.sin(ph + hy), lfz = Math.cos(ph + hy);
+      tmpV.set(px + lfx * 30, py + 1.0 + Math.tan(Math.max(-1, Math.min(1, V.pitch))) * 30, pz + lfz * 30); cam.lookAt(tmpV);
       st.init = false;
     } else {
+      if (CK) CK.off();
       const far2 = camMode === 'far';
       const back = far2 ? 9.5 : 6.2, up = far2 ? 3.6 : 2.3;
       // смотрим немного по вектору скорости, чтобы занос был виден
       let dx = fx, dz = fz;
       if (sp > 4) { const vl = Math.hypot(vx, vz); dx = fx * 0.6 + vx / vl * 0.4; dz = fz * 0.6 + vz / vl * 0.4; const l = Math.hypot(dx, dz); dx /= l; dz /= l; }
-      const tx = px - dx * back, tz = pz - dz * back, ty = py + up;
+      const ob = R.orbitOffset(dx, dz, back, up, V, orbTmp);
+      const tx = px + ob.x, tz = pz + ob.z, ty = py + ob.y;
       if (!st.init || Math.hypot(tx - st.x, tz - st.z) > 25) { st.x = tx; st.y = ty; st.z = tz; st.init = true; }   // скачок (возврат на трассу) - без долгого догона
       const kk = 1 - Math.exp(-dt * 7);
       st.x += (tx - st.x) * kk; st.y += (ty - st.y) * kk; st.z += (tz - st.z) * kk;
       if (pl.hit > 3) st.shake = Math.min(0.6, pl.hit * 0.05);
       st.shake *= Math.exp(-dt * 6);
-      cam.position.set(st.x + (Math.random() - 0.5) * st.shake, st.y + (Math.random() - 0.5) * st.shake, st.z);
-      tmpV.set(px + fx * 3, py + 1.1, pz + fz * 3); cam.lookAt(tmpV);
-      if (st.y < py + 0.8) cam.position.y = py + 0.8;
+      // штанга: луч от машины к камере по нарисованной обстановке трассы; что встало между - камера ближе
+      const ax = px, ay = py + 1.4, az = pz;
+      let bx = st.x, by = Math.max(st.y, py + 0.8), bz = st.z;
+      const len = Math.hypot(bx - ax, by - ay, bz - az);
+      if (len > 0.5 && X.solids && X.solids.length) {
+        armRay.set(tmpV.set(ax, ay, az), tmpV2.set(bx - ax, by - ay, bz - az).normalize()); armRay.far = len + 0.5;
+        const hit = armRay.intersectObjects(X.solids, false)[0];
+        const k = hit ? Math.max(0.15, (hit.distance - 0.5) / len) : 1;
+        st.arm = st.arm === undefined || k < st.arm ? k : st.arm + (k - st.arm) * 0.08;
+        bx = ax + (bx - ax) * st.arm; by = ay + (by - ay) * st.arm; bz = az + (bz - az) * st.arm;
+      }
+      cam.position.set(bx + (Math.random() - 0.5) * st.shake, by + (Math.random() - 0.5) * st.shake, bz);
+      if (ob.free) tmpV.set(px, py + 1.1, pz); else tmpV.set(px + fx * 3, py + 1.1, pz + fz * 3);
+      cam.lookAt(tmpV);
     }
     st.fov += (fovT - st.fov) * (1 - Math.exp(-dt * 3));
     cam.fov = st.fov; cam.near = 0.3; cam.far = far + 200; cam.updateProjectionMatrix();
@@ -1064,7 +1100,9 @@
     X.sun.position.set(px + 80, py + 140, pz + 60); X.sun.target.position.set(px, py, pz); X.sun.target.updateMatrixWorld();
     if (X.headlight) { X.headlight.position.set(px + fx * 1.5, py + 1.2, pz + fz * 1.5); X.headlight.target.position.set(px + fx * 25, py, pz + fz * 25); X.headlight.target.updateMatrixWorld(); }
     if (X.ctx.stars) X.ctx.stars.position.set(cam.position.x, 0, cam.position.z);
+    if (camMode === 'cockpit' && CK && pc) CK.mirrors(R.renderer, X.scene, pc.root);
     R.renderer.render(X.scene, cam);
+    if (camMode === 'cockpit' && CK && pc) CK.render(R.renderer);
   };
 
   // Точка (qx, qz) закрывает игрока (px, pz) от камеры (cx, cz): рядом с отрезком камера-игрок или вплотную к камере.

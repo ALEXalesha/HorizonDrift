@@ -176,6 +176,8 @@
   #hMapC { width: 100%; height: 100%; }
   #hSpeedo { right: 16px; bottom: 16px; width: 230px; height: 230px; border-radius: 50%; }
   #hSpeedC { width: 100%; height: 100%; }
+  /* из салона приборы - на панели машины: большой спидометр и полоса нитро прячутся */
+  .cockpit-view #hSpeedo, .cockpit-view #hNitro { display: none; }
   #hNitro { right: 256px; bottom: 34px; width: 22px; height: 150px; padding: 3px; }
   #hNitro i { position: absolute; left: 3px; right: 3px; bottom: 3px; border-radius: 8px; background: linear-gradient(0deg, #1f7bff, var(--cyan)); }
   #hNitro span { position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%); font-size: 9px; color: #fff; letter-spacing: 0; background: rgba(10, 9, 18, 0.8); border: 1px solid rgba(25, 211, 255, 0.5); padding: 1px 3px; border-radius: 5px; }
@@ -434,6 +436,7 @@
 <script src="js/core.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/render.js"></script>
+<script src="js/cockpit.js"></script>
 <script src="js/world.js"></script>
 <script src="js/worldrender.js"></script>
 <script src="js/game.js"></script>

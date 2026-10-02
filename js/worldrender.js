@@ -254,13 +254,13 @@
           const Fs = M.fest, fg = new THREE.Group(), base = 0.15;
           fg.position.set(Fs.x, Fs.y, Fs.z); fg.rotation.y = Fs.rot; group.add(fg); W.festGroup = fg;
           const mat = new THREE.MeshLambertMaterial({ color: 0xff5a1f }), mat2 = new THREE.MeshLambertMaterial({ color: 0x2a2c33 }), white = new THREE.MeshLambertMaterial({ color: 0xf4f4f4 });
-          const padMat = new THREE.MeshLambertMaterial({ color: 0x6f7178 });
+          const padMat = new THREE.MeshLambertMaterial({ color: 0x4a4c52 });
           const pad = ghost(new THREE.Mesh(new THREE.CylinderGeometry(Fs.r, Fs.r, 0.5, 40), padMat), 'ground'); pad.position.y = base - 0.25; fg.add(pad);
           // подъезд от дороги: полоса по тем же высотам, что у физики
           const D = Fs.drive, dg = new THREE.BufferGeometry(), dp = [], di = [], ux = D.bx - D.ax, uz = D.bz - D.az, L = Math.hypot(ux, uz), nx = -uz / L, nz = ux / L, nseg = 12;
           for (let k = 0; k <= nseg; k++) { const t = k / nseg, x = D.ax + ux * t, z = D.az + uz * t, yy = D.ay + (D.by - D.ay) * t + 0.12; dp.push(x + nx * D.w / 2, yy, z + nz * D.w / 2, x - nx * D.w / 2, yy, z - nz * D.w / 2); if (k) { const q = (k - 1) * 2; di.push(q, q + 1, q + 2, q + 1, q + 3, q + 2); } }
           dg.setAttribute('position', new THREE.Float32BufferAttribute(dp, 3)); dg.setIndex(di); dg.computeVertexNormals();
-          group.add(ghost(new THREE.Mesh(dg, new THREE.MeshLambertMaterial({ color: 0x55575d, side: THREE.DoubleSide })), 'ground'));
+          group.add(ghost(new THREE.Mesh(dg, new THREE.MeshLambertMaterial({ color: 0x3a3c41, side: THREE.DoubleSide })), 'ground'));
           for (const q of M.FEST_PARTS) {
             const h = q.y1 - q.y0, cy = base + (q.y0 + q.y1) / 2;
             if (q.part === 'stage') { const m = solid(new THREE.Mesh(new THREE.BoxGeometry(q.w, h, q.d), mat2), 'fest-stage'); m.position.set(q.x, cy, q.z); fg.add(m); }
@@ -650,6 +650,7 @@
     W.stars.material.opacity = T.night && wth === 'clear' ? 1 : 0;
     // свет: фонари и фары - в темноте, в тумане и в дождь; мокрый асфальт темнее, пятна света ярче
     const dark = Math.max(T.dark, wth === 'fog' ? 0.5 : 0, wth === 'rain' ? 0.35 : 0);
+    W.dark = dark; W.light = Math.min(1, T.hemi / 0.7);
     W.mat.lampHead.color.setScalar(0.47 + 0.53 * dark); if (dark > 0.3) W.mat.lampHead.color.setRGB(1, 0.94, 0.75);
     W.mat.pool.opacity = dark * (wth === 'rain' ? 0.7 : 0.55);
     W.mat.building.emissiveIntensity = T.night ? 0.9 : 0;
@@ -702,7 +703,7 @@
       for (const w of cm.wheels) { w.spin.rotation.x = cm.spin; if (w.front) w.pivot.rotation.y = c.steer; }
       cm.tailMat.emissiveIntensity = c.braking ? 2.4 : 0.6;
       cm.headMat.emissiveIntensity = 1.2 + dark * 1.8;
-      cm.root.visible = !(camMode === 'hood' && c === p && !W.photo);
+      cm.root.visible = !((camMode === 'hood' || camMode === 'cockpit') && c === p && !W.photo);
       const skid = Math.max(c.skidR || 0, (c.skidF || 0) * 0.6), loose = c.surf !== 'asphalt' && c.surf !== 'concrete';
       if (!c.air && (skid > 0.35 || (loose && c.speed > 9)) && Math.random() < 0.8 && Math.abs(x - p.x) + Math.abs(z - p.z) < 160) {
         const rz = -cm.L / 2 + cm.S.ax[0], hw = cm.W / 2 - 0.15, sn = Math.sin(h), cs = Math.cos(h);
@@ -725,9 +726,13 @@
     const sk = R.camera.far * 0.9 / 2600;
     W.sky.position.copy(R.camera.position); W.sky.scale.setScalar(sk);
     W.stars.position.copy(R.camera.position); W.stars.scale.setScalar(sk);
+    const ckOn = camMode === 'cockpit' && R.cockpit && !W.photo && W.carMeshes.get(p);
+    if (ckOn) R.cockpit.mirrors(R.renderer, W.scene, W.carMeshes.get(p).root); else if (R.cockpit) R.cockpit.off();
     R.renderer.render(W.scene, R.camera);
+    if (ckOn) R.cockpit.render(R.renderer);
   };
 
+  const orbTmp = {};
   function camera(dt, camMode) {
     const cam = R.camera, st = W.cam, p = W.world.player, cm = W.carMeshes.get(p);
     const px = cm ? cm.root.position.x : p.x, py = cm ? cm.root.position.y : p.y, pz = cm ? cm.root.position.z : p.z, ph = cm ? cm.root.rotation.y : p.h;
@@ -736,22 +741,43 @@
       const ph2 = W.photo;
       armTo(cam, px, py + 1.2, pz, px + Math.sin(ph2.yaw) * Math.cos(ph2.pitch) * ph2.dist, py + 1 + Math.sin(ph2.pitch) * ph2.dist, pz + Math.cos(ph2.yaw) * Math.cos(ph2.pitch) * ph2.dist, p.y, st, true);
       tmpV.set(px, py + 1, pz); cam.lookAt(tmpV);
+    } else if (camMode === 'cockpit' && R.cockpit && cm) {
+      const CK = R.cockpit, V = R.view, lim = R.VIEW, s = W.settings || {};
+      CK.ensure(p.carId);
+      const dark = W.dark || 0, wth = W.world.weather;
+      CK.update(dt, { car: p, steerN: (p.steer || 0) / (p.st.steer || 0.6), kmh: C.toUnits(p.speed, s.units), vmax: C.toUnits(p.st.top, s.units), rpm: p.rpm || 0, gear: p.gear, nitro: p.nitro, dark, light: W.light === undefined ? 1 : W.light, rain: wth === 'rain', units: s.units });
+      const look = { yaw: V.back ? lim.cockpitYaw : Math.max(-lim.cockpitYaw, Math.min(lim.cockpitYaw, V.yaw)), pitch: Math.max(-lim.cockpitPitch, Math.min(lim.cockpitPitch, V.pitch)) };
+      st.fov += (72 + Math.min(1, p.speed / 70) * 6 - st.fov) * (1 - Math.exp(-dt * 3));
+      CK.place(cam, cm.root, look, st.fov); st.init = false; st.armInit = false;
     } else if (camMode === 'hood') {
-      cam.position.set(px + fx * 0.35, py + 1.25, pz + fz * 0.35); tmpV.set(px + fx * 30, py + 1.0, pz + fz * 30); cam.lookAt(tmpV); st.init = false;
+      const V = R.view, hy = V.back ? Math.PI : Math.max(-R.VIEW.cockpitYaw, Math.min(R.VIEW.cockpitYaw, V.yaw)), lfx = Math.sin(ph + hy), lfz = Math.cos(ph + hy);
+      cam.position.set(px + fx * 0.35, py + 1.25, pz + fz * 0.35); tmpV.set(px + lfx * 30, py + 1.0 + Math.tan(Math.max(-1, Math.min(1, V.pitch))) * 30, pz + lfz * 30); cam.lookAt(tmpV); st.init = false;
     } else {
       const far2 = camMode === 'far', back = far2 ? 9.5 : 6.2, up = far2 ? 3.6 : 2.3;
       let dx = fx, dz = fz; const sp = p.speed;
       if (sp > 4) { const vl = Math.hypot(p.vx, p.vz); dx = fx * 0.6 + p.vx / vl * 0.4; dz = fz * 0.6 + p.vz / vl * 0.4; const l = Math.hypot(dx, dz); dx /= l; dz /= l; }
-      const tx = px - dx * back, tz = pz - dz * back;
-      let ty = py + up; const gy = W.M.groundAt(tx, tz, gq, py).y; if (ty < gy + 1.2) ty = gy + 1.2;
+      const ob = R.orbitOffset(dx, dz, back, up, R.view, orbTmp);
+      const tx = px + ob.x, tz = pz + ob.z;
+      let ty = py + ob.y; const gy = W.M.groundAt(tx, tz, gq, py).y; if (ty < gy + 1.2) ty = gy + 1.2;
       if (!st.init || Math.hypot(tx - st.x, tz - st.z) > 25) { st.x = tx; st.y = ty; st.z = tz; st.init = true; st.armInit = false; }
       const kk = 1 - Math.exp(-dt * 7); st.x += (tx - st.x) * kk; st.y += (ty - st.y) * kk; st.z += (tz - st.z) * kk;
       // пружинная штанга: от крыши машины к месту камеры; что встало между (дом, шатёр, склон, свод тоннеля) - камера ближе
-      armTo(cam, px, py + 1.5, pz, st.x, st.y, st.z, p.y, st, false);
-      tmpV.set(px + fx * 3, py + 1.1, pz + fz * 3); cam.lookAt(tmpV);
+      // если штанга упирается близко (стена сбоку при облёте) - камера поднимается выше по стене, чтобы видеть машину, а не крышу
+      let cx = st.x, cy = st.y, cz = st.z;
+      const blen = Math.hypot(cx - px, cy - py - 2.1, cz - pz), free = W.M.sweep(px, py + 2.1, pz, cx, cy, cz, CAM_R, p.y) * blen;
+      if (free < 3.2 && blen > 3.2) {
+        const hx = (cx - px), hz = (cz - pz), hl = Math.hypot(hx, hz) || 1;
+        for (const el of [0.75, 1.1, 1.35]) {
+          const ux = px + hx / hl * Math.cos(el) * blen, uy = py + 2.1 + Math.sin(el) * blen, uz = pz + hz / hl * Math.cos(el) * blen;
+          if (W.M.sweep(px, py + 2.1, pz, ux, uy, uz, CAM_R, p.y) * blen > Math.max(free + 1, 3.2)) { cx = ux; cy = uy; cz = uz; break; }
+        }
+      }
+      armTo(cam, px, py + 2.1, pz, cx, cy, cz, p.y, st, false);      // опора над крышей: короткая штанга смотрит на машину сверху, а не в крышу
+      if (ob.free) tmpV.set(px, py + 1.1, pz); else tmpV.set(px + fx * 3, py + 1.1, pz + fz * 3);
+      cam.lookAt(tmpV);
     }
     const fovT = 60 + Math.min(1, p.speed / 70) * 16 + (p.nitroOn ? 6 : 0);
-    st.fov += (fovT - st.fov) * (1 - Math.exp(-dt * 3));
+    if (camMode !== 'cockpit' || W.photo) st.fov += (fovT - st.fov) * (1 - Math.exp(-dt * 3));
     cam.fov = W.photo ? 55 : st.fov; cam.near = CAM_NEAR; cam.far = farD; cam.updateProjectionMatrix();
     // фара: над машиной, светит вниз-вперёд
     W.headlight.position.set(px + fx * 0.5, py + 4.5, pz + fz * 0.5); W.headlight.target.position.set(px + fx * 22, py, pz + fz * 22); W.headlight.target.updateMatrixWorld();

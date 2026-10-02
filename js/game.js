@@ -334,7 +334,9 @@
     } else if (G.sTab === 'game') {
       h = row('Сложность соперников', seg('difficulty', Object.keys(D.DIFFICULTY).map((k) => [k, D.DIFFICULTY[k].name])), 'темп и число ошибок ИИ')
         + row('Скорость', seg('units', [['kmh', 'км/ч'], ['mph', 'mph']]))
-        + row('Камера по умолчанию', seg('camera', [['chase', 'Сзади'], ['far', 'Дальняя'], ['hood', 'С капота']]), 'в гонке - клавиша ' + kb('camera'))
+        + row('Камера по умолчанию', seg('camera', [['chase', 'Сзади'], ['far', 'Дальняя'], ['hood', 'С капота'], ['cockpit', 'Из салона']]), 'в гонке - клавиша ' + kb('camera'))
+        + row('Чувствительность взгляда', range('lookSens', 0.3, 3, 0.1), 'правая кнопка мыши - осмотреться, колесо - дальше/ближе, ' + kb('lookBack') + ' - назад')
+        + row('Инверсия по вертикали', onoff('invertY'), 'мышь и правый стик')
         + row('Коробка передач', seg('gearbox', [['auto', 'Автомат'], ['manual', 'Ручная']]), `ручная: ${kb('shiftUp')} - вверх, ${kb('shiftDown')} - вниз`)
         + row('Антипробуксовка', onoff('tc')) + row('АБС', onoff('abs'), 'без АБС колёса блокируются, руль хуже слушается')
         + row('Помощь рулём', onoff('steerAssist'), 'меньше угол на скорости и подруливание в заносе')
@@ -754,7 +756,7 @@
       if (G.paused) return;
       G.keys.add(e.code);
       if (e.repeat) return;
-      if (act === 'camera') { const order = ['chase', 'far', 'hood']; G.camMode = order[(order.indexOf(G.camMode) + 1) % order.length]; showMsg({ chase: 'Камера сзади', far: 'Дальняя камера', hood: 'Камера с капота' }[G.camMode], '', 700); }
+      if (act === 'camera') { cycleCamera(); }
       if (act === 'shiftUp') G.input.shiftUp = true;
       if (act === 'shiftDown') G.input.shiftDown = true;
       return;
@@ -767,7 +769,7 @@
       if (G.paused) return;
       G.keys.add(e.code);
       if (e.repeat) return;
-      if (act === 'camera') { const order = ['chase', 'far', 'hood']; G.camMode = order[(order.indexOf(G.camMode) + 1) % order.length]; showMsg({ chase: 'Камера сзади', far: 'Дальняя камера', hood: 'Камера с капота' }[G.camMode], '', 700); }
+      if (act === 'camera') { cycleCamera(); }
       if (act === 'reset' && G.race.player && G.race.phase === 'race' && !G.race.player.finished) G.race.resetCar(G.race.player);
       if (act === 'shiftUp') G.input.shiftUp = true;
       if (act === 'shiftDown') G.input.shiftDown = true;
@@ -798,7 +800,7 @@
       if ((G.screen === 'race' && G.race) || (G.screen === 'world' && G.world)) {
         if (edge(9)) setPaused(!G.paused);
         if (!G.paused) {
-          if (edge(3)) { const order = ['chase', 'far', 'hood']; G.camMode = order[(order.indexOf(G.camMode) + 1) % order.length]; }
+          if (edge(3)) { cycleCamera(); }
           if (edge(5)) inp.shiftUp = true; if (edge(4)) inp.shiftDown = true;
           if (edge(8) && G.race && G.race.player && G.race.phase === 'race') G.race.resetCar(G.race.player);
           if (edge(8) && G.world && !G.race) G.world.resetPlayer();
@@ -852,6 +854,7 @@
     fpsAcc += dt; fpsN++; if (fpsAcc > 0.5) { G.fps = Math.round(fpsN / fpsAcc); fpsAcc = 0; fpsN = 0; }
     const t0 = performance.now();
     readInput();
+    updateView(dt);
     let alpha = 1;
     if (G.race && (G.screen === 'race' || G.screen === 'settings') && !G.paused && G.screen === 'race' && !G.manual) {
       G.acc = (G.acc || 0) + dt;
@@ -1244,6 +1247,64 @@
     window.addEventListener('wheel', (e) => { if (G.overlay === 'photo') WR.photoMove(0, 0, e.deltaY > 0 ? 1.1 : 0.9); }, { passive: true });
   })();
 
+  // ---------- камеры и свободный взгляд ----------
+  const CAMS = ['chase', 'far', 'hood', 'cockpit'], CAM_NAMES = { chase: 'Камера сзади', far: 'Дальняя камера', hood: 'Камера с капота', cockpit: 'Вид из салона' };
+  function cycleCamera() {
+    G.camMode = CAMS[(CAMS.indexOf(G.camMode) + 1) % CAMS.length];
+    G.settings.camera = G.camMode; save(KEY.settings, G.settings);          // выбор камеры запоминается
+    resetView(); showMsg(CAM_NAMES[G.camMode], '', 700);
+  }
+  const look = { drag: false, idle: 99, lx: 0, ly: 0 };
+  function resetView() { R.view.yaw = 0; R.view.pitch = 0; R.view.back = false; look.idle = 99; }
+  // повернуть взгляд на (dx, dy) точек мыши: чувствительность и инверсия - из настроек
+  function lookBy(dx, dy) {
+    const k = 0.0042 * (G.settings.lookSens || 1), inv = G.settings.invertY ? -1 : 1;
+    R.view.yaw -= dx * k; R.view.pitch -= dy * k * inv; look.idle = 0; clampView();
+  }
+  function clampView() {
+    const V = R.view, L = R.VIEW;
+    if (G.camMode === 'cockpit' || G.camMode === 'hood') { V.yaw = Math.max(-L.cockpitYaw, Math.min(L.cockpitYaw, V.yaw)); V.pitch = Math.max(-L.cockpitPitch, Math.min(L.cockpitPitch, V.pitch)); }
+    else {
+      if (V.yaw > Math.PI) V.yaw -= 2 * Math.PI; if (V.yaw < -Math.PI) V.yaw += 2 * Math.PI;
+      const base = Math.atan2(G.camMode === 'far' ? 3.6 : 2.3, G.camMode === 'far' ? 9.5 : 6.2);
+      V.pitch = Math.max(L.orbitPitchMin - base, Math.min(L.orbitPitchMax - base, V.pitch));
+    }
+  }
+  // каждый кадр: правый стик, «взгляд назад», возврат вперёд без движения мыши
+  function updateView(dt) {
+    const V = R.view, car = G.world && G.screen === 'world' ? G.world.player : G.race ? G.race.player : null;
+    const p = G.settings.gamepad ? getPad() : null;
+    let back = actionDown('lookBack');
+    if (p && !G.paused) {
+      const dz = G.settings.deadzone, ax = p.axes[2] || 0, ay = p.axes[3] || 0, f = (v) => (Math.abs(v) > dz ? Math.sign(v) * (Math.abs(v) - dz) / (1 - dz) : 0);
+      const sx = f(ax), sy = f(ay); if (sx || sy) lookBy(sx * 650 * dt, sy * 420 * dt);
+      if (p.buttons[11] && p.buttons[11].pressed) back = true;
+    }
+    V.back = !!back && !G.paused;
+    look.idle += dt;
+    // салон: через 1.5 с без мыши взгляд плавно возвращается вперёд; облёт: через 3 с, если машина едет
+    const inCab = G.camMode === 'cockpit' || G.camMode === 'hood';
+    const ret = !look.drag && (inCab ? look.idle > 1.5 : look.idle > 3 && car && car.speed > 3);
+    if (ret) { const k = 1 - Math.exp(-dt * 4.5); V.yaw -= V.yaw * k; V.pitch -= V.pitch * k; if (Math.abs(V.yaw) < 1e-3) V.yaw = 0; if (Math.abs(V.pitch) < 1e-3) V.pitch = 0; }
+    clampView();
+    document.body.classList.toggle('cockpit-view', G.camMode === 'cockpit' && (G.screen === 'race' || G.screen === 'world') && G.overlay !== 'photo');
+  }
+  (function lookMouse() {
+    const gl = $('gl');
+    gl.addEventListener('contextmenu', (e) => e.preventDefault());
+    gl.addEventListener('pointerdown', (e) => { if (e.button === 2 && G.overlay !== 'photo') { look.drag = true; look.lx = e.clientX; look.ly = e.clientY; } });
+    window.addEventListener('pointerup', (e) => { if (e.button === 2) look.drag = false; });
+    window.addEventListener('pointermove', (e) => {
+      if (G.overlay === 'photo' || G.paused) return;
+      if (document.pointerLockElement === gl) lookBy(e.movementX || 0, e.movementY || 0);
+      else if (look.drag) { lookBy(e.clientX - look.lx, e.clientY - look.ly); look.lx = e.clientX; look.ly = e.clientY; }
+    });
+    window.addEventListener('wheel', (e) => {
+      if (G.overlay === 'photo' || !(G.screen === 'race' || G.screen === 'world')) return;
+      R.view.zoom = Math.max(R.VIEW.zoomMin, Math.min(R.VIEW.zoomMax, R.view.zoom * (e.deltaY > 0 ? 1.1 : 0.9))); look.idle = 0;
+    }, { passive: true });
+  })();
+
   function worldKey(e, act) {
     const w = G.world;
     if (G.overlay === 'photo') { if (e.code === 'Enter') photoSave(); if (e.code === 'KeyF' || e.code === 'Escape') photoToggle(false); e.preventDefault(); return true; }
@@ -1277,7 +1338,8 @@
     get settings() { return G.settings; }, get career() { return G.career; }, get records() { return G.records; },
     get race() { return G.race; }, get player() { return G.race ? G.race.player : null; }, get screen() { return G.screen; },
     get paused() { return G.paused; }, get loading() { return !!G.loading; }, get buildCount() { return G.buildCount || 0; },
-    setCamera(m) { G.camMode = m; }, get camMode() { return G.camMode; }, get renderer() { return R.renderer; }, get lastResult() { return G.lastResult; }, get lastApply() { return G.lastApply; },
+    setCamera(m) { G.camMode = m; resetView(); }, get camMode() { return G.camMode; }, cycleCamera, lookBy, get view() { return R.view; }, get cockpit() { return R.cockpit ? R.cockpit.state : null; },
+    setLook(o) { Object.assign(look, o || {}); }, get look() { return look; }, get renderer() { return R.renderer; }, get lastResult() { return G.lastResult; }, get lastApply() { return G.lastApply; },
     set manual(v) { G.manual = !!v; }, get manual() { return G.manual; },
     setSetting, show, toMenu: quitToMenu, pause: () => setPaused(true), resume: () => setPaused(false),
     startCareer: (id) => startCareerEvent(id),

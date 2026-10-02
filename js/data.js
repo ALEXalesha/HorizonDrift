@@ -213,19 +213,19 @@
     { id: 'accel', name: 'Газ' }, { id: 'brake', name: 'Тормоз / назад' }, { id: 'left', name: 'Руль влево' },
     { id: 'right', name: 'Руль вправо' }, { id: 'handbrake', name: 'Ручник' }, { id: 'nitro', name: 'Нитро' },
     { id: 'shiftUp', name: 'Передача вверх' }, { id: 'shiftDown', name: 'Передача вниз' }, { id: 'camera', name: 'Камера' },
-    { id: 'reset', name: 'Вернуться на трассу' }, { id: 'pause', name: 'Пауза (и Esc)' },
+    { id: 'reset', name: 'Вернуться на трассу' }, { id: 'pause', name: 'Пауза (и Esc)' }, { id: 'lookBack', name: 'Взгляд назад' },
   ];
   const DEFAULT_BINDINGS = {
     accel: ['KeyW', 'ArrowUp'], brake: ['KeyS', 'ArrowDown'], left: ['KeyA', 'ArrowLeft'], right: ['KeyD', 'ArrowRight'],
     handbrake: ['Space', ''], nitro: ['ShiftLeft', 'ShiftRight'], shiftUp: ['KeyE', ''], shiftDown: ['KeyQ', ''],
-    camera: ['KeyC', ''], reset: ['KeyR', ''], pause: ['KeyP', ''],
+    camera: ['KeyC', ''], reset: ['KeyR', ''], pause: ['KeyP', ''], lookBack: ['KeyV', ''],
   };
 
   const DEFAULT_SETTINGS = {
     musicVol: 0.5, sfxVol: 0.8, engineVol: 0.7, difficulty: 'normal', units: 'kmh',
     bindings: DEFAULT_BINDINGS, steerSens: 1, gearbox: 'auto', tc: true, abs: true, steerAssist: true,
     quality: 'high', shadows: true, drawDist: 'far', particles: 'high', showFps: false, camera: 'chase', motionBlur: true,
-    gamepad: true, deadzone: 0.15,
+    gamepad: true, deadzone: 0.15, lookSens: 1, invertY: false,
   };
   const QUALITY = {
     low: { pixelRatio: 0.75, shadowMap: 0, decor: 0.35, particles: 'low', drawDist: 'near', aa: false },

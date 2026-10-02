@@ -1079,9 +1079,9 @@
 
   // ======================= НАСТРОЙКИ =======================
   // Настройки из хранилища: только известные ключи, числа - в пределах, строки - из списка допустимых.
-  const SET_RANGE = { musicVol: [0, 1], sfxVol: [0, 1], engineVol: [0, 1], steerSens: [0.5, 1.6], deadzone: [0, 0.4] };
+  const SET_RANGE = { musicVol: [0, 1], sfxVol: [0, 1], engineVol: [0, 1], steerSens: [0.5, 1.6], deadzone: [0, 0.4], lookSens: [0.3, 3] };
   const SET_ENUM = { difficulty: () => Object.keys(D.DIFFICULTY), units: () => ['kmh', 'mph'], gearbox: () => ['auto', 'manual'], quality: () => Object.keys(D.QUALITY),
-    drawDist: () => Object.keys(D.DRAW_DIST), particles: () => ['low', 'medium', 'high'], camera: () => ['chase', 'far', 'hood'] };
+    drawDist: () => Object.keys(D.DRAW_DIST), particles: () => ['low', 'medium', 'high'], camera: () => ['chase', 'far', 'hood', 'cockpit'] };
   const CODE_RE = /^[A-Za-z0-9]{1,24}$/;
   function mergeSettings(saved) {
     const s = JSON.parse(JSON.stringify(D.DEFAULT_SETTINGS));
