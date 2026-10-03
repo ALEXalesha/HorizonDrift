@@ -1,0 +1,17 @@
+{
+  "name": "horizondrift",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Horizon Drift: arcade 3D racing and drifting in one HTML page, three.js, works offline (fan-made)",
+  "author": "ALEXalesha",
+  "license": "MIT",
+  "homepage": "https://alexalesha.github.io/HorizonDrift/",
+  "repository": { "type": "git", "url": "git+https://github.com/ALEXalesha/HorizonDrift.git" },
+  "scripts": {
+    "test": "playwright test",
+    "screenshots": "node tools/screenshots.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1"
+  }
+}
