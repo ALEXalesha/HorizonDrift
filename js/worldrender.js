@@ -38,6 +38,7 @@
   const tmpC1 = new THREE.Color(), tmpC2 = new THREE.Color(), tmpV = new THREE.Vector3(), gq = {};
 
   // ---------- текстуры света ----------
+  let WIN_TEX = null;
   function glowTex(kind) {
     return R._.canvasTex(128, 128, (g, w) => {
       if (kind === 'cone') {
@@ -92,7 +93,7 @@
       for (const sf of ['asphalt', 'gravel', 'snow']) { const t = _.surfaceTex(sf); m.road[sf] = new THREE.MeshLambertMaterial({ map: t, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }); }
       // перекрёсток: асфальт без разметки поверх концов дорог
       const plain = _.canvasTex(256, 256, (g, w) => { g.fillStyle = '#2d2e32'; g.fillRect(0, 0, w, w); _.speckle(g, w, w, _.rngOf(21), 3000, ['#232428', '#393a3f', '#2a2b2f', '#44454a'], 1, 2.5); }, true);
-      m.plain = new THREE.MeshLambertMaterial({ map: plain, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+      m.plain = new THREE.MeshLambertMaterial({ map: plain, polygonOffset: true, polygonOffsetFactor: -8, polygonOffsetUnits: -8 });      // круг перекрёстка над разметкой без мерцания
       m.sidewalk = new THREE.MeshLambertMaterial({ color: 0xa9abb2, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
       m.concrete = new THREE.MeshLambertMaterial({ color: 0x9a9ca2, side: THREE.DoubleSide });       // плита моста видна и снизу
       m.rail = new THREE.MeshLambertMaterial({ map: _.wallTex('rail'), side: THREE.DoubleSide });
@@ -104,10 +105,12 @@
       m.pool = new THREE.MeshBasicMaterial({ map: glowTex('round'), side: THREE.DoubleSide, transparent: true, depthWrite: false, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneMinusDstColorFactor, blendDst: THREE.OneFactor, premultipliedAlpha: true, opacity: 0, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 });
       // свет фар ложится «экраном»: тёмный асфальт светлеет, светлая разметка не выгорает в белое пятно
       m.beam = new THREE.MeshBasicMaterial({ map: glowTex('cone'), side: THREE.DoubleSide, transparent: true, depthWrite: false, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneMinusDstColorFactor, blendDst: THREE.OneFactor, premultipliedAlpha: true, opacity: 0, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 });
-      const win = _.canvasTex(128, 128, (g, w) => {
+      // окна домов - одна текстура на всю игру (не создаётся заново на каждый мир и не освобождается): раньше
+      // текстура прежнего мира иногда грузилась снова при прогреве нового и оставалась в видеокарте
+      const win = WIN_TEX || (WIN_TEX = _.canvasTex(128, 128, (g, w) => {
         g.fillStyle = '#5f6776'; g.fillRect(0, 0, w, w);
         for (let y = 8; y < w; y += 32) for (let x = 8; x < w; x += 32) { g.fillStyle = _.rngOf(x * 31 + y)() < 0.55 ? '#ffd98a' : '#2a2e3a'; g.fillRect(x, y, 16, 20); }
-      }, true);
+      }, true, true)); win.userData.keep = true;
       m.building = new THREE.MeshLambertMaterial({ map: win, emissiveMap: win, emissive: 0xffffff, emissiveIntensity: 0 });
       const cont = _.canvasTex(64, 64, (g, w) => { g.fillStyle = '#fff'; g.fillRect(0, 0, w, w); g.fillStyle = 'rgba(0,0,0,0.18)'; for (let x = 0; x < w; x += 6) g.fillRect(x, 0, 2, w); }, true);
       m.container = new THREE.MeshLambertMaterial({ map: cont });
@@ -398,7 +401,7 @@
           else if (road && road.d < road.hw + 20 && !road.bridge) y = Math.min(y, road.y - 0.6);
         } else y = M.terrainHeight(x, z);
         // над тоннелем в сетке прорезь: её закрывает свод горы, и рельеф не лезет в стены
-        if (road && road.tunnel && road.d < road.hw + 2.5) cut[j * n + i] = 1;
+        if (M.gridCut(road)) cut[j * n + i] = 1;
         if (edge) y -= 5;
         const k = (j * n + i) * 3; pos[k] = x; pos[k + 1] = y; pos[k + 2] = z;
         M.biomeColor(x, z, c);
@@ -472,7 +475,7 @@
           ghost(add(stripGeom(M, tunnel, -hw - 1.2, 7, hw + 1.2, 'slab'), W.mat.tunnel), 'overhead');
           ghost(add(stripGeom(M, tunnel, -hw - 1.1, 0.0, hw + 1.1, 'slab'), W.mat.tunnel), 'ground');          // пол тоннеля от стены до стены
           ghost(add(stripGeom(M, tunnel, -0.3, 6.9, 0.3, 'slab'), W.mat.tunnelLight), 'overhead');
-          ghost(add(capGeom(M, tunnel, hw + 7.5), W.mat.rock), 'ground');
+          ghost(add(capGeom(M, tunnel), W.mat.rock), 'ground');
         }
       }
     }
@@ -553,15 +556,13 @@
     return g;
   }
   // Свод горы над тоннелем: полоса на высоте рельефа над осью, шире прорези в сетке.
-  function capGeom(M, list, half) {
-    const pos = [], uv = [], idx = [];
+  // свод горы над тоннелем: столбцы поперёк из профиля мира (физика берёт высоту из того же профиля)
+  function capGeom(M, list) {
+    const pos = [], uv = [], idx = [], C5 = M.CAP_COLS, nc = C5.length;
     list.forEach((i, k) => {
-      const nx = -M.TZ[i], nz = M.TX[i];
-      for (const sd of [-1, 0, 1]) {
-        const x = M.X[i] + nx * sd * half, z = M.Z[i] + nz * sd * half;
-        pos.push(x, Math.max(M.terrainHeight(x, z), M.Y[i] + 7.4) + 0.08, z); uv.push(x / 24, z / 24);
-      }
-      if (k > 0) { const b = (k - 1) * 3; idx.push(b, b + 3, b + 1, b + 1, b + 3, b + 4, b + 1, b + 4, b + 2, b + 2, b + 4, b + 5); }
+      const nx = -M.TZ[i], nz = M.TX[i], half = M.capHalf(i), prof = M.capProfile(i);
+      C5.forEach((c, j) => { const x = M.X[i] + nx * c * half, z = M.Z[i] + nz * c * half; pos.push(x, prof[j], z); uv.push(x / 24, z / 24); });
+      if (k > 0) { const b = (k - 1) * nc; for (let j = 0; j < nc - 1; j++) idx.push(b + j, b + j + 1, b + nc + j, b + j + 1, b + nc + j + 1, b + nc + j); }      // лицом вверх (раньше смотрел вниз и сверху не рисовался)
     });
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals();
     return g;
@@ -839,9 +840,12 @@
     W.scene.traverse((o) => {
       if (o.isInstancedMesh) o.dispose();
       if (o.geometry && !shared.has(o.geometry)) o.geometry.dispose();
-      if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => { if (m.map) m.map.dispose(); if (m.emissiveMap) m.emissiveMap.dispose(); m.dispose(); });
+      if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => { if (m.map && !m.map.userData.keep) m.map.dispose(); if (m.emissiveMap && !m.emissiveMap.userData.keep) m.emissiveMap.dispose(); m.dispose(); });
     });
     for (const o of W.owned) if (o && o.dispose) o.dispose();
+    // общие материалы мира и их текстуры (окна домов и прочие) - явно: дом мог ни разу не попасть в сцену
+    const mats = []; for (const k in W.mat) { const m = W.mat[k]; if (m && m.isMaterial) mats.push(m); else if (m && typeof m === 'object') for (const k2 in m) if (m[k2] && m[k2].isMaterial) mats.push(m[k2]); }
+    for (const m of mats) { for (const t of ['map', 'emissiveMap', 'alphaMap', 'bumpMap']) if (m[t] && !m[t].userData.keep) m[t].dispose(); m.dispose(); }
     if (W.keepCar) { R._.disposeCar(W.keepCar); for (const o of W.keepCar.owned) if (o.dispose) o.dispose(); W.keepCar = null; }
     for (const g of shared) g.dispose();
     W.sun.dispose(); W.headlight.dispose();

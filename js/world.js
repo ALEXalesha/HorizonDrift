@@ -305,7 +305,11 @@
     const urbanFlag = new Uint8Array(N);
     M.urban = (i) => { let v = urbanFlag[i]; if (!v) { v = urbanFlag[i] = R[regionMix(X[i], Z[i], mixTmp).i].biome === 'concrete' ? 2 : 1; } return v === 2; };
     // тротуара нет и там, где к дороге примыкает подъезд фестиваля
-    M.sidewalkAt = (i) => !(FL[i] & 3) && M.urban(i) && !M.inJunction(i) && !(FEST && FEST.drive && Math.hypot(X[i] - FEST.drive.ax, Z[i] - FEST.drive.az) < 9);
+    // тротуара нет и там, где он лёг бы на полосу соседней дороги
+    const walkOk = new Int8Array(N);
+    const walkClear = (i) => { let v = walkOk[i]; if (!v) { const hw = edges[E[i]].hw, nx = -TZ[i], nz = TX[i]; v = 1; for (const sd of [-1, 1]) for (const off of [hw + 0.8, hw + 2.2]) { const q = nearestRoad(X[i] + nx * sd * off, Z[i] + nz * sd * off, wq); if (q && E[q.i] !== E[i] && q.d < q.hw + 0.3) v = 2; } walkOk[i] = v; } return v === 1; };
+    const wq = {};
+    M.sidewalkAt = (i) => !(FL[i] & 3) && M.urban(i) && !M.inJunction(i) && !(FEST && FEST.drive && Math.hypot(X[i] - FEST.drive.ax, Z[i] - FEST.drive.az) < 9) && walkClear(i);
     M.SIDEWALK = { w: 3, top: 0.18 };
 
     // --- сетка для быстрого поиска ближайшей дороги ---
@@ -380,6 +384,47 @@
       return lerp(walk && q.d >= hw ? q.y + 0.04 : q.y - 0.3, raw, t);
     }
     M.terrainHeight = terrainHeight;
+    // ---- рисуемая сетка рельефа: вершины через 6.4 м (как у ближних кусков), треугольники a-c-b и b-c-d ----
+    const GRID = CHUNK / 40, gridCache = new Map(), gvq = {};
+    function gridVertex(gi, gj) {
+      const k = gi * 65536 + gj; let v = gridCache.get(k);
+      if (v === undefined) {
+        const x = gi * GRID, z = gj * GRID, q = nearestRoad(x, z, gvq);
+        v = M.gridCut(q) ? NaN : terrainHeight(x, z);        // NaN - вершина вырезана: над тоннелем свод
+        gridCache.set(k, v); if (gridCache.size > 250000) gridCache.delete(gridCache.keys().next().value);
+      }
+      return v;
+    }
+    // q - ближайшая дорога (если уже найдена): у тоннеля сверху лежит свод - земля там - верхняя из двух поверхностей
+    function meshGround(x, z, q) {
+      const gi = Math.floor(x / GRID), gj = Math.floor(z / GRID), u = x / GRID - gi, v = z / GRID - gj;
+      const ha = gridVertex(gi, gj), hb = gridVertex(gi + 1, gj), hc = gridVertex(gi, gj + 1), hd = gridVertex(gi + 1, gj + 1);
+      const cp = (q === undefined || (q && q.tunnel)) ? capHeight(x, z, q) : null;
+      if (ha !== ha || hb !== hb || hc !== hc || hd !== hd) return cp === null ? terrainHeight(x, z) : cp;
+      const h = u + v <= 1 ? ha + (hb - ha) * u + (hc - ha) * v : hd + (hc - hd) * (1 - u) + (hb - hd) * (1 - v);
+      return cp === null ? h : Math.max(h, cp);
+    }
+    M.meshGround = meshGround;
+    // вершина сетки вырезается только над самим тоннелем (обе точки отрезка - тоннель): у входа дыр без свода не остаётся
+    M.gridCut = (q) => !!(q && q.tunnel && (FL[q.i + 1] & 2) && q.d < q.hw + 2.5);
+    // ---- свод горы над тоннелем: 5 столбцов поперёк на каждой точке тоннеля (рисунок - из тех же высот) ----
+    const CAP_COLS = [-1, -0.5, 0, 0.5, 1], capCache = new Map(), cpq = {};
+    M.CAP_COLS = CAP_COLS;
+    M.capHalf = (i) => edges[E[i]].hw + 12;
+    M.capProfile = function (i) {
+      let p = capCache.get(i); if (p) return p;
+      const half = M.capHalf(i), nx = -TZ[i], nz = TX[i];
+      p = CAP_COLS.map((c) => { const x = X[i] + nx * c * half, z = Z[i] + nz * c * half; return Math.max(terrainHeight(x, z), Y[i] + 7.4) + 0.08; });
+      capCache.set(i, p); return p;
+    };
+    function capHeight(x, z, q0) {
+      const q = q0 || nearestRoad(x, z, cpq); if (!q || !(FL[q.i] & 2) || !(FL[q.i + 1] & 2)) return null;
+      const half = M.capHalf(q.i), c = q.lat / half; if (Math.abs(c) > 1) return null;
+      // те же треугольники, что у рисунка: A=(i,k) B=(i,k+1) C=(i+1,k) D=(i+1,k+1), A-B-C и B-D-C
+      const f = (c + 1) * 2, k = Math.min(3, Math.floor(f)), s = f - k, t = q.t, p0 = M.capProfile(q.i), p1 = M.capProfile(q.i + 1);
+      const A = p0[k], B = p0[k + 1], Cc = p1[k], D = p1[k + 1];
+      return s + t <= 1 ? A + (B - A) * s + (Cc - A) * t : D + (Cc - D) * (1 - s) + (B - D) * (1 - t);
+    }
     M.surfAt = (x, z) => BIOME[R[regionMix(x, z, mixTmp).i].biome].surf;
     M.biomeColor = function (x, z, out) {
       // смесь цветов областей
@@ -501,7 +546,7 @@
         if (road && q.bridge && yRef < q.y - 1.5) road = false;
         if (q.tunnel) road = yRef <= q.y + 4 && q.d <= q.hw + 2;
       }
-      if (road) { out.y = q.y; out.surf = q.surf; out.onRoad = true; out.q = q; } else { out.y = terrainHeight(x, z); out.surf = M.surfAt(x, z); out.onRoad = false; out.q = q; }
+      if (road) { out.y = q.y; out.surf = q.surf; out.onRoad = true; out.q = q; } else { out.y = meshGround(x, z, q); out.surf = M.surfAt(x, z); out.onRoad = false; out.q = q; }
       out.walk = false;
       if (!out.onRoad) { const nd = junctionAt(x, z, yRef); if (nd) { out.y = nd.y; out.surf = 'asphalt'; out.onRoad = true; } }
       if (q && q.d > q.hw && q.d <= q.hw + M.SIDEWALK.w && !q.tunnel && !q.bridge && M.sidewalkAt(q.i) && M.sidewalkAt(q.i + 1) && (yRef === undefined || yRef > q.y - 1.5)) { out.y = q.y + M.SIDEWALK.top; out.surf = 'asphalt'; out.onRoad = true; out.walk = true; }
@@ -628,7 +673,9 @@
     const pillars = new Map();
     for (const e of edges) for (let i = e.i0; i <= e.i1; i++) {
       if (!(FL[i] & 1) || !(S[i] % 26 < e.step)) continue;
-      const ground = Math.max(RAW[i], WATER - 6), top = Y[i] - 1.4;
+      // низ опоры - по самой низкой точке земли под ней (на склоне угол не висит над землёй)
+      let low = RAW[i]; for (const [ox, oz] of [[0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7]]) low = Math.min(low, rawHeight(X[i] + ox, Z[i] + oz));
+      const ground = Math.max(low - 0.3, WATER - 6), top = Y[i] - 1.4;
       if (top - ground <= 1) continue;
       const kk = key(Math.floor(X[i] / CHUNK), Math.floor(Z[i] / CHUNK));
       if (!pillars.has(kk)) pillars.set(kk, []);
@@ -1134,7 +1181,8 @@
       const moved = Math.hypot(c.x - x0, c.z - z0);
       // въезд на рампу с её нижнего края по ходу - не уступ
       const upRamp = g1.ramp && moved > 1e-6 && ((c.x - x0) * g1.ramp.tx + (c.z - z0) * g1.ramp.tz) / moved > 0.5;
-      if (!c.air && !upRamp && g1.y - yPrev > 0.45 + 0.6 * moved) {
+      const rise = g1.y - yPrev, steep = !g1.onRoad && moved > 0.02 && rise > 0.06 && rise / moved > 0.7;
+      if (!c.air && !upRamp && (rise > 0.45 + 0.6 * moved || steep)) {
         const gx = c.x - x0, gz = c.z - z0, l = moved || 1, nx = -gx / l, nz = -gz / l;
         c.x = x0; c.z = z0; const vn = c.vx * nx + c.vz * nz;
         if (vn < 0) { c.vx -= 1.3 * vn * nx; c.vz -= 1.3 * vn * nz; c.w *= 0.5; c.hit = Math.max(c.hit || 0, -vn); }
