@@ -620,7 +620,7 @@
       setHtml('hBoard', h);
     }
     $('hNitroBar').style.height = `calc((100% - 6px) * ${pl.nitro.toFixed(3)})`;
-    $('hNitroBar').style.opacity = pl.nitroOn ? '1' : '0.8';
+    $('hNitroBar').style.opacity = pl.nitroOn ? '1' : pl.nitroLock ? '0.35' : '0.8';        // пустой баллон тусклый, пока не наберёт 10%
     $('hWrong').style.display = pl.wrong && !pl.finished ? 'block' : 'none';
     const cd = $('hCount');
     if (race.phase === 'countdown') { cd.style.display = 'block'; setText('hCount', String(Math.ceil(race.countdown))); }
@@ -1097,6 +1097,7 @@
     const c = w.counts(); setText('wBoards', c.boards + ' / ' + c.boardsAll);
     setText('wMoney', money(G.career.money));
     $('hNitroBar').style.height = `calc((100% - 6px) * ${p.nitro.toFixed(3)})`;
+    $('hNitroBar').style.opacity = p.nitroOn ? '1' : p.nitroLock ? '0.35' : '0.8';
     const dr = w.drift, showDrift = w.zone && dr.active && dr.pending > 0;
     $('hDrift').style.display = w.zone ? 'block' : 'none';
     if (w.zone) { setText('hDriftPts', (showDrift ? '+' + dr.pending.toLocaleString('ru-RU') : (dr.total || 0).toLocaleString('ru-RU'))); setText('hDriftMul', '×' + dr.mult); $('hDriftGrace').style.width = Math.round((1 - dr.grace / 1.2) * 100) + '%'; }

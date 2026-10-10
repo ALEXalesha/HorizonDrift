@@ -276,6 +276,7 @@
   // ======================= МАШИНА =======================
   const GEARS = [0.3, 0.46, 0.61, 0.75, 0.88, 1.04];      // доля максимальной скорости на каждой передаче
   const CAR_A = 1.2, CAR_B = 1.4, WB = CAR_A + CAR_B;      // от центра масс до осей, м
+  const NITRO_REARM = 0.1;                                  // с какого запаса опустевшее нитро снова включается
 
   function carDef(id) { return D.CARS.find((c) => c.id === id) || D.CARS[0]; }
   function upgradeLevels(u) { const o = {}; for (const up of D.UPGRADES) o[up.id] = clamp((u && u[up.id]) | 0, 0, D.UPG_MAX); return o; }
@@ -311,7 +312,7 @@
     o = o || {};
     return {
       st, name: o.name || '', carId: st.id, look: o.look || null, isPlayer: !!o.isPlayer, ai: null, rival: !!o.rival,
-      x: 0, z: 0, y: 0, h: 0, vx: 0, vz: 0, w: 0, steer: 0, gear: 1, rpm: 900, rpmN: 0.11, shiftT: 0, nitro: 1, nitroOn: false,
+      x: 0, z: 0, y: 0, h: 0, vx: 0, vz: 0, w: 0, steer: 0, gear: 1, rpm: 900, rpmN: 0.11, shiftT: 0, nitro: 1, nitroOn: false, nitroLock: false,
       inp: { thr: 0, brk: 0, steer: 0, hb: 0, nitro: 0, analog: false, shiftUp: false, shiftDown: false },
       assist: { tc: true, abs: true, steer: false, auto: true, sens: 1 },
       speed: 0, vLong: 0, beta: 0, skidR: 0, skidF: 0, spin: 0, surf: 'asphalt', onRunoff: false, hit: 0, events: [],
@@ -381,11 +382,17 @@
         Fdrive = driveThr * Math.min(st.power / Math.max(Math.abs(vLong), 1), st.launch * m * G) * tq;
       }
     } else if (driveThr > 0 && vLong > -9) Fdrive = -driveThr * 0.45 * m * G;
-    // нитро - аркадный «толчок» мимо шин: работает и когда колёса уже на пределе сцепления
+    // нитро - аркадный «толчок» мимо шин: работает и когда колёса уже на пределе сцепления.
+    // Опустевший баллон заперт, пока запас не вернётся к NITRO_REARM: иначе капля пополнения за шаг
+    // (0.012/с в заезде, 0.02/с в мире) включала толчок целиком - «бесконечное нитро» на пустой полосе.
+    // Остаток меньше расхода за шаг толкает долей: сколько запаса было, столько толчка.
     car.nitroOn = false;
     let Fnitro = 0;
-    if (inp.nitro && car.nitro > 0 && car.gear > 0 && driveThr > 0.2) {
-      Fnitro = st.nitroBoost * m * G; car.nitro = Math.max(0, car.nitro - dt / st.nitroCap); car.nitroOn = true;
+    if (car.nitroLock && car.nitro >= NITRO_REARM) car.nitroLock = false;
+    if (inp.nitro && car.nitro > 0 && !car.nitroLock && car.gear > 0 && driveThr > 0.2) {
+      const use = dt / st.nitroCap;
+      Fnitro = st.nitroBoost * m * G * (car.nitro >= use ? 1 : car.nitro / use); car.nitro = Math.max(0, car.nitro - use); car.nitroOn = true;
+      if (car.nitro <= 0) car.nitroLock = true;
     }
     const frontShare = st.drive === 'fwd' ? 1 : st.drive === 'awd' ? 0.4 : 0;
     let FxF = Fdrive * frontShare, FxR = Fdrive * (1 - frontShare);
@@ -1237,7 +1244,7 @@
     return m + ':' + (s < 10 ? '0' : '') + s.toFixed(2);
   }
 
-  return { G, DT, STEP, GEARS, clamp, lerp, mulberry32, hashStr, buildTrack, project, pointAt, idxAt, trackClearance, solveAutos, runTurtle,
+  return { G, DT, STEP, GEARS, NITRO_REARM, clamp, lerp, mulberry32, hashStr, buildTrack, project, pointAt, idxAt, trackClearance, solveAutos, runTurtle,
     carDef, carStats, upgradeLevels, makeCar, stepCar, accelTime, surfMu, DriftScorer, speedProfile, Race, botTime, timeThresholds, TIME_MEDALS,
     carBoxContact, carCircleContact, carCarContact, collideCarPair, resolveStatic, carCorners,
     medalFor, rewardFor, findEvent, newCareer, defaultLook, Career, sanitizeCareer, sanitizeRecords, cleanLook, eventEntries, mergeSettings, rebind, toUnits, fmtTime, MEDAL_RANK };
