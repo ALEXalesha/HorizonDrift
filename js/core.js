@@ -338,6 +338,10 @@
     const S = D.SURF[surfName] || D.SURF.asphalt;
     const down = 1 + st.aero * Math.min(1.3, (speed / st.top) * (speed / st.top));
     const mu = st.grip * surfMu(surfName, st) * (car.gripMul || 1);   // gripMul - погода в открытом мире
+    // повреждения «полные» (damage.js): стёртые шины держат хуже, увод руля, смятый перед слабее тянет.
+    // Без них (выкл, только вид) dmgFx нет и каждое число ниже то же самое, что было до повреждений.
+    const dfx = car.dmgFx;
+    const muF = dfx ? mu * dfx.gripF : mu, muR = dfx ? mu * dfx.gripR : mu, muB = dfx ? (muF + muR) / 2 : mu;
     const Nf = m * G * CAR_B / WB * down, Nr = m * G * CAR_A / WB * down;
     car.events.length = 0;
 
@@ -380,6 +384,7 @@
         let tq = rN < 1 ? 0.62 + 0.38 * Math.sin(Math.min(1, rN / 0.8) * Math.PI / 2) : (car.gear === 6 ? 1 : 0);
         if (rN > 1.02 && car.gear < 6) tq = 0;                               // отсечка
         Fdrive = driveThr * Math.min(st.power / Math.max(Math.abs(vLong), 1), st.launch * m * G) * tq;
+        if (dfx) Fdrive *= dfx.power;
       }
     } else if (driveThr > 0 && vLong > -9) Fdrive = -driveThr * 0.45 * m * G;
     // нитро - аркадный «толчок» мимо шин: работает и когда колёса уже на пределе сцепления.
@@ -400,18 +405,19 @@
     // --- тормоза и ручник ---
     const sgnL = vLong > 0.05 ? 1 : vLong < -0.05 ? -1 : 0;
     let Fb = brakeIn * 1.15 * m * G, lockF = false;
-    if (as.abs) Fb = Math.min(Fb, mu * m * G * 0.98 * down);
-    else if (brakeIn > 0.85 && speed > 6) { lockF = true; Fb = 0.8 * mu * m * G; }
+    if (as.abs) Fb = Math.min(Fb, muB * m * G * 0.98 * down);
+    else if (brakeIn > 0.85 && speed > 6) { lockF = true; Fb = 0.8 * muB * m * G; }
     FxF -= Fb * 0.62 * sgnL; FxR -= Fb * 0.38 * sgnL;
     car.braking = brakeIn > 0.05 && sgnL > 0;
-    const rearCap = mu * Nr * st.rearMul * (inp.hb ? st.hbMul : 1);
-    if (inp.hb) FxR -= 0.4 * mu * Nr * sgnL;
+    const rearCap = muR * Nr * st.rearMul * (inp.hb ? st.hbMul : 1);
+    if (inp.hb) FxR -= 0.4 * muR * Nr * sgnL;
 
     // --- боковые силы шин (до круга трения) ---
     const den = Math.max(Math.abs(vLong), 3), sgnV = vLong >= -0.5 ? 1 : -1;
-    const aF = Math.atan2(vLat + car.w * CAR_A, den) - car.steer * sgnV;
+    const steerA = dfx ? car.steer + dfx.pull : car.steer;       // увод руля от удара в переднее колесо
+    const aF = Math.atan2(vLat + car.w * CAR_A, den) - steerA * sgnV;
     const aR = Math.atan2(vLat - car.w * CAR_B, den);
-    const capF = mu * Nf, capR = mu * Nr * st.rearMul;
+    const capF = muF * Nf, capR = muR * Nr * st.rearMul;
     let Fyf = tyre(aF, 0.15, capF);
     let Fyr = tyre(aR, 0.12, rearCap);
     // на малой скорости модель увода неустойчива - плавно переходим к простому гашению бокового скольжения
@@ -432,7 +438,7 @@
     if (lockF) latF = 0.25;
     Fyf *= latF; Fyr *= latR;
 
-    const cs = Math.cos(car.steer), sn = Math.sin(car.steer);
+    const cs = Math.cos(steerA), sn = Math.sin(steerA);
     const drag = st.cd * vLong * Math.abs(vLong);
     const roll = (Math.abs(vLong) > 0.3 ? sgnL : 0) * m * G * (st.crr + S.drag);
     const Fx = FxF * cs - Fyf * sn + FxR + Fnitro - drag - roll;
@@ -440,7 +446,7 @@
     const ax = Fx / m, ay = Fy / m;
     car.vx += (ax * fx + ay * rx) * dt; car.vz += (ax * fz + ay * rz) * dt;
     car.w += (CAR_A * (FxF * sn + Fyf * cs) - CAR_B * Fyr) / st.I * dt;
-    if (kLow < 1) car.w = lerp(car.w, vLong * Math.tan(car.steer) / WB, 1 - kLow);
+    if (kLow < 1) car.w = lerp(car.w, vLong * Math.tan(steerA) / WB, 1 - kLow);
     car.h -= car.w * dt;
     // тормоз останавливает, но не толкает назад
     const vL2 = car.vx * fx + car.vz * fz;
@@ -711,6 +717,7 @@
         c.prevX = c.x; c.prevZ = c.z;
         stepCar(c, dt, c.onRunoff ? tr.runoffSurf : c.surf);
         this.trackCar(c);
+        if (c.dmg) c.dmg.step(c, dt);                // износ шин (damage.js): только читает скольжения
       }
       if (!racing) return;
       this.collideCars();
@@ -754,7 +761,10 @@
       if (!tr.closed && ((pr.i === 0 && pr.along < 0) || (pr.i >= tr.N - 2 && pr.t >= 1 && pr.along > 0))) {
         c.x -= pr.along * pr.tx; c.z -= pr.along * pr.tz;
         const va = c.vx * pr.tx + c.vz * pr.tz;
-        if (va * pr.along > 0) { c.vx -= va * pr.tx * 1.3; c.vz -= va * pr.tz * 1.3; c.hit = Math.max(c.hit, Math.abs(va)); }
+        if (va * pr.along > 0) {
+          c.vx -= va * pr.tx * 1.3; c.vz -= va * pr.tz * 1.3; c.hit = Math.max(c.hit, Math.abs(va));
+          if (c.dmg) { const sg = pr.along > 0 ? 1 : -1, hl = (c.st.len || 4.3) / 2; c.dmg.hit(c, c.x + sg * pr.tx * hl, c.z + sg * pr.tz * hl, -sg * pr.tx, -sg * pr.tz, 1.3 * Math.abs(va) * c.st.mass); }
+        }
       }
       // стены: концы машины (±1.7 м) не дальше W от оси; удар - импульс с плечом
       const lim = tr.W - 0.95, m = c.st.mass, I = c.st.I;
@@ -775,6 +785,8 @@
           const vnn = c.vx * onx + c.vz * onz, tvx = c.vx - vnn * onx, tvz = c.vz - vnn * onz, tv = Math.hypot(tvx, tvz);
           if (tv > 0.01) { const dv = Math.min(tv, 0.3 * J / m); c.vx -= tvx / tv * dv; c.vz -= tvz / tv * dv; }
           c.hit = Math.max(c.hit, vn);
+          // повреждения: точка удара - угол машины у стены; только чтение, движение уже посчитано
+          if (c.dmg) { const hw = (c.st.wid || 1.8) / 2; c.dmg.hit(c, c.x + Math.sin(c.h) * sk + onx * hw, c.z + Math.cos(c.h) * sk + onz * hw, -onx, -onz, J); }
         }
       }
       c.y = pr.y; c.surf = pr.surf; c.onRunoff = Math.abs(pr.d) > tr.hw + 0.4;
@@ -1088,7 +1100,8 @@
   // Настройки из хранилища: только известные ключи, числа - в пределах, строки - из списка допустимых.
   const SET_RANGE = { musicVol: [0, 1], sfxVol: [0, 1], engineVol: [0, 1], steerSens: [0.5, 1.6], deadzone: [0, 0.4], lookSens: [0.3, 3] };
   const SET_ENUM = { difficulty: () => Object.keys(D.DIFFICULTY), units: () => ['kmh', 'mph'], gearbox: () => ['auto', 'manual'], quality: () => Object.keys(D.QUALITY),
-    drawDist: () => Object.keys(D.DRAW_DIST), particles: () => ['low', 'medium', 'high'], camera: () => ['chase', 'far', 'hood', 'cockpit'] };
+    drawDist: () => Object.keys(D.DRAW_DIST), particles: () => ['low', 'medium', 'high'], camera: () => ['chase', 'far', 'hood', 'cockpit'],
+    damage: () => ['off', 'visual', 'full'] };
   const CODE_RE = /^[A-Za-z0-9]{1,24}$/;
   function mergeSettings(saved) {
     const s = JSON.parse(JSON.stringify(D.DEFAULT_SETTINGS));
@@ -1192,6 +1205,7 @@
     const vnn = c.vx * k.nx + c.vz * k.nz, tvx = c.vx - vnn * k.nx, tvz = c.vz - vnn * k.nz, tv = Math.hypot(tvx, tvz);
     if (tv > 0.01) { const dv = Math.min(tv, 0.3 * J / m); c.vx -= tvx / tv * dv; c.vz -= tvz / tv * dv; }
     c.hit = Math.max(c.hit || 0, -vn);
+    if (c.dmg) c.dmg.hit(c, k.px, k.pz, k.nx, k.nz, J);
     return -vn;
   }
   // Две машины: разделяющие оси обоих прямоугольников, раздвинуть по массам, импульс с плечами.
@@ -1229,6 +1243,8 @@
     a.vx += J * ima * k.nx; a.vz += J * ima * k.nz; a.w = wa + J * la[2] / a.st.I;
     b.vx -= J * imb * k.nx; b.vz -= J * imb * k.nz; b.w = wb - J * lb[2] / b.st.I;
     a.hit = Math.max(a.hit || 0, -vrel); b.hit = Math.max(b.hit || 0, -vrel);
+    if (a.dmg) a.dmg.hit(a, k.px, k.pz, k.nx, k.nz, J);
+    if (b.dmg) b.dmg.hit(b, k.px, k.pz, -k.nx, -k.nz, J);
     return -vrel;
   }
   // Углы кузова в плане (для проверок и рисования).

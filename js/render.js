@@ -162,9 +162,40 @@
       }
     }
     g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-    g.computeVertexNormals();
-    return g;
+    const t = tessellate(g, 0.22); g.dispose();
+    t.computeVertexNormals();
+    return t;
   }
+  // Мелкие треугольники для вмятин (повреждения): силуэт кузова выдавлен большими гранями - у носа всего две
+  // вершины по ширине, и вмятине в середине нечего двигать. Длинная сторона делится пополам, пока не станет
+  // короче maxLen; развёртка - по середине стороны. Только для не индексированной геометрии.
+  function tessellate(g, maxLen) {
+    const P = g.attributes.position.array, U = g.attributes.uv.array, out = [], outU = [], m2 = maxLen * maxLen;
+    const stack = [];
+    for (let i = 0; i < P.length / 9; i++) {
+      stack.push([P[i * 9], P[i * 9 + 1], P[i * 9 + 2], P[i * 9 + 3], P[i * 9 + 4], P[i * 9 + 5], P[i * 9 + 6], P[i * 9 + 7], P[i * 9 + 8],
+        U[i * 6], U[i * 6 + 1], U[i * 6 + 2], U[i * 6 + 3], U[i * 6 + 4], U[i * 6 + 5]]);
+      while (stack.length) {
+        const t = stack.pop();
+        const d = (a, b) => (t[a * 3] - t[b * 3]) ** 2 + (t[a * 3 + 1] - t[b * 3 + 1]) ** 2 + (t[a * 3 + 2] - t[b * 3 + 2]) ** 2;
+        const e0 = d(0, 1), e1 = d(1, 2), e2 = d(2, 0), mx = Math.max(e0, e1, e2);
+        if (mx <= m2) { for (let k = 0; k < 9; k++) out.push(t[k]); for (let k = 9; k < 15; k++) outU.push(t[k]); continue; }
+        // вершины a-b - длинная сторона, c - напротив; середина m делит треугольник на (a, m, c) и (m, b, c)
+        const a = mx === e0 ? 0 : mx === e1 ? 1 : 2, b = (a + 1) % 3, c = (a + 2) % 3;
+        const v = (i2) => [t[i2 * 3], t[i2 * 3 + 1], t[i2 * 3 + 2]], uvv = (i2) => [t[9 + i2 * 2], t[10 + i2 * 2]];
+        const A = v(a), B = v(b), Cc = v(c), M = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2, (A[2] + B[2]) / 2];
+        const uA = uvv(a), uB = uvv(b), uC = uvv(c), uM = [(uA[0] + uB[0]) / 2, (uA[1] + uB[1]) / 2];
+        stack.push([...A, ...M, ...Cc, ...uA, ...uM, ...uC], [...M, ...B, ...Cc, ...uM, ...uB, ...uC]);
+      }
+    }
+    const t = new THREE.BufferGeometry();
+    t.setAttribute('position', new THREE.Float32BufferAttribute(out, 3));
+    t.setAttribute('uv', new THREE.Float32BufferAttribute(outU, 2));
+    return t;
+  }
+  // Кузов одной формы строится один раз: мелкая сетка для вмятин дороже простого выдавливания; машине - копия.
+  const geoProto = {};
+  function protoGeo(key, make) { if (!geoProto[key]) geoProto[key] = make(); return geoProto[key].clone(); }
 
   let liveryCache = {};
   function liveryTex(carId, look, own) {
@@ -260,16 +291,39 @@
     const paint = new THREE.MeshStandardMaterial({ map: liv, metalness: 0.45, roughness: 0.32, envMap: R.envMap, envMapIntensity: 0.9 });
     const glass = new THREE.MeshStandardMaterial({ color: 0x0c1016, metalness: 0.6, roughness: 0.12, envMap: R.envMap, envMapIntensity: 1.2 });
     const dark = new THREE.MeshStandardMaterial({ color: 0x16171a, metalness: 0.2, roughness: 0.7 });
-    const body = new THREE.Mesh(bodyGeom(S.lower, L, W, H), paint);
+    const shapeKey = SHAPES[def.shape] ? def.shape : 'coupe';
+    const body = new THREE.Mesh(protoGeo('body:' + shapeKey, () => bodyGeom(S.lower, L, W, H)), paint);
     body.castShadow = true; grp.add(body);
-    const cab = new THREE.Mesh(extrude(S.cabin, W - 0.34, 0.04), glass);
-    cab.geometry.translate(-L / 2, 0, -(W - 0.34) / 2); cab.geometry.rotateY(-Math.PI / 2); cab.castShadow = true; grp.add(cab);
+    const cab = new THREE.Mesh(protoGeo('cab:' + shapeKey, () => {
+      const g = extrude(S.cabin, W - 0.34, 0.04); g.translate(-L / 2, 0, -(W - 0.34) / 2); g.rotateY(-Math.PI / 2);
+      const t = tessellate(g, 0.3); g.dispose(); t.computeVertexNormals(); return t;
+    }), glass);
+    cab.castShadow = true; grp.add(cab);
     // крыша - полоска цвета кузова поверх стёкол
     const cb = S.cabin, roofPts = [[cb[1][0] + 0.05, cb[1][1] - 0.04], [cb[1][0] + 0.08, cb[1][1] + 0.03], [cb[2][0] - 0.05, cb[2][1] + 0.03], [cb[2][0] - 0.02, cb[2][1] - 0.04]];
     const roof = new THREE.Mesh(extrude(roofPts, W - 0.4, 0.02), paint);
     roof.geometry.translate(-L / 2, 0, -(W - 0.4) / 2); roof.geometry.rotateY(-Math.PI / 2); grp.add(roof);
-    // бампер-юбка
-    const skirt = new THREE.Mesh(new THREE.BoxGeometry(W - 0.02, 0.12, L - 0.1), dark); skirt.position.y = S.lower[0][1] + 0.02; grp.add(skirt);
+    // юбка по бокам (бамперы спереди и сзади - отдельные детали, см. ниже)
+    const skirt = new THREE.Mesh(new THREE.BoxGeometry(W - 0.02, 0.12, L - 0.62), dark); skirt.position.y = S.lower[0][1] + 0.02; grp.add(skirt);
+    // детали, которые отлетают при сильном ударе (повреждения, damage.js): бамперы, зеркала, капот.
+    // Геометрия сразу в координатах машины, развёртка - как у кузова: рисунок ливреи продолжается на деталях.
+    const parts = {};
+    const partMesh = (name, geo, mat) => { partUV(geo, L, W, H); geo.computeBoundingBox(); const m = new THREE.Mesh(geo, mat || paint); m.castShadow = true; m.userData.part = name; m.userData.center = geo.boundingBox.getCenter(new THREE.Vector3()); grp.add(m); parts[name] = m; return m; };
+    const lw = S.lower, nose = lw[lw.length - 2], low0 = lw[0][1];
+    partMesh('bumperF', new THREE.BoxGeometry(W - 0.08, 0.2, 0.32).translate(0, nose[1] - 0.02, nose[0] - L / 2 - 0.12));
+    partMesh('bumperR', new THREE.BoxGeometry(W - 0.08, 0.2, 0.3).translate(0, low0 + 0.08, -L / 2 + 0.1));
+    const cb0 = S.cabin[S.cabin.length - 1];                  // низ лобового стекла
+    for (const sx of [-1, 1]) {
+      const g = new THREE.BoxGeometry(0.2, 0.11, 0.09); g.translate(sx * (W / 2 + 0.04), cb0[1] + 0.06, cb0[0] - L / 2 - 0.12);
+      partMesh(sx > 0 ? 'mirrorL' : 'mirrorR', g);           // +x у меша - левый борт машины
+    }
+    {
+      // капот: тонкая крышка по верху кузова от стекла до носа
+      const topY = (x) => { for (let i = 1; i < lw.length - 2; i++) { const a = lw[i], b = lw[i + 1]; if (x >= a[0] && x <= b[0]) return a[1] + (b[1] - a[1]) * (x - a[0]) / Math.max(1e-6, b[0] - a[0]); } return lw[lw.length - 3][1]; };
+      const xa = cb0[0] + 0.04, xb = lw[lw.length - 3][0] - 0.05, ya = topY(xa), yb = topY(xb), len = Math.hypot(xb - xa, yb - ya);
+      const g = new THREE.BoxGeometry(W - 0.32, 0.03, len); g.rotateX(-Math.atan2(yb - ya, xb - xa)); g.translate(0, (ya + yb) / 2 + 0.025, (xa + xb) / 2 - L / 2);
+      partMesh('hood', g);
+    }
     if (S.spoiler === 'wing') {
       const wing = new THREE.Mesh(new THREE.BoxGeometry(W - 0.1, 0.05, 0.35), dark); wing.position.set(0, H + 0.32, -L / 2 + 0.25); grp.add(wing);
       for (const sx of [-0.55, 0.55]) { const post = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.3, 0.12), dark); post.position.set(sx, H + 0.16, -L / 2 + 0.3); grp.add(post); }
@@ -281,12 +335,15 @@
     // фары и стопы
     const headMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff4d6, emissiveIntensity: 1.2 });
     const tailMat = new THREE.MeshStandardMaterial({ color: 0x550000, emissive: 0xff1a1a, emissiveIntensity: 0.6 });
-    const front = S.lower[S.lower.length - 2], rearY = S.lower[1][1] - 0.18;
+    const front = S.lower[S.lower.length - 2], rearY = S.lower[1][1] - 0.18, lights = [];
     for (const sx of [-1, 1]) {
       const hl = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.1, 0.08), headMat); hl.position.set(sx * (W / 2 - 0.35), front[1] + 0.05, front[0] - L / 2 + 0.02); grp.add(hl);
       const tl = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.1, 0.06), tailMat); tl.position.set(sx * (W / 2 - 0.33), rearY, -L / 2 - 0.08); grp.add(tl);
+      lights.push(hl, tl);
     }
-    if (S.lightbar) { const lb = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.1, 0.1), headMat); lb.position.set(0, S.cabin[2][1] + 0.08, S.cabin[2][0] - L / 2 - 0.1); grp.add(lb); }
+    if (S.lightbar) { const lb = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.1, 0.1), headMat); lb.position.set(0, S.cabin[2][1] + 0.08, S.cabin[2][0] - L / 2 - 0.1); grp.add(lb); lights.push(lb); }
+    // фары и стопы едут вместе с вмятиной, а смятые сильно - разбиты (не видны)
+    for (const m of lights) { const p = m.position; m.userData.r3 = new Float32Array([p.x, p.y, p.z]); m.userData.p3 = new Float32Array([p.x, p.y, p.z]); }
     // колёса
     const tyreMat = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.9 });
     const rimMat = new THREE.MeshStandardMaterial({ map: rim, metalness: 0.7, roughness: 0.3, envMap: R.envMap });
@@ -305,8 +362,98 @@
     const blob = new THREE.Mesh(new THREE.PlaneGeometry(W + 0.8, L + 0.9), new THREE.MeshBasicMaterial({ map: getBlob(), transparent: true, depthWrite: false }));
     blob.rotation.x = -Math.PI / 2; blob.position.y = 0.04; blob.renderOrder = 1;
     const root = new THREE.Group(); root.add(grp); root.add(blob);
-    return { root, body: grp, paint, rimMat, headMat, tailMat, wheels, blob, S, L, W, carId, look: Object.assign({}, look), mats: [paint, glass, dark, headMat, tailMat, tyreMat, rimMat], ownTex: opts.own ? [liv, rim] : [] };
+    return { root, body: grp, paint, rimMat, headMat, tailMat, wheels, blob, S, L, W, carId, look: Object.assign({}, look), mats: [paint, glass, dark, headMat, tailMat, tyreMat, rimMat], ownTex: opts.own ? [liv, rim] : [],
+      parts, lights, dentable: [body.geometry, cab.geometry, roof.geometry], dentSeen: 0, detSeen: 0, repairs: 0 };
   }
+  // Развёртка детали как у кузова: верхние грани - вид сверху, остальные - вид сбоку.
+  function partUV(g, L, W, H) {
+    const pos = g.attributes.position, nrm = g.attributes.normal, uv = g.attributes.uv;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      uv.setXY(i, (z + L / 2) / L, Math.abs(nrm.getY(i)) > 0.55 ? 0.02 + 0.46 * (x / W + 0.5) : 0.52 + 0.46 * Math.min(1, Math.max(0, y / H)));
+    }
+    uv.needsUpdate = true;
+  }
+
+  // ---------- повреждения на экране (damage.js): вмятины, отлетевшие детали, обломки ----------
+  // Вызывается каждый кадр для каждой машины, но работает только когда в c.dmg появилось новое: вмятина,
+  // оторванная деталь, ремонт. Без новостей - ни одного выделения памяти.
+  const dmgV = new THREE.Vector3(), dmgQ = new THREE.Quaternion(), dmgE = new THREE.Euler();
+  function restoreCar(cm) {
+    for (const g of cm.dentable) { const rest = g.userData.rest; if (!rest) continue; g.attributes.position.array.set(rest); g.attributes.position.needsUpdate = true; g.computeVertexNormals(); }
+    for (const k in cm.parts) { const m = cm.parts[k]; m.visible = true; m.rotation.set(0, 0, 0); m.position.set(0, 0, 0); }
+    for (const m of cm.lights) { const r = m.userData.r3; m.userData.p3.set(r); m.position.set(r[0], r[1], r[2]); m.visible = true; }
+  }
+  R.damageSync = function (cm, c, fx) {
+    const d = c.dmg;
+    if (!d) return;
+    if (cm.repairs !== d.repairs) { restoreCar(cm); cm.repairs = d.repairs; cm.dentSeen = d.dentN; cm.detSeen = d.detachN; }
+    if (cm.dentSeen < d.dentN) {
+      const DM = window.DriftDamage;
+      for (let n = Math.max(cm.dentSeen, d.dentN - d.dents.length); n < d.dentN; n++) {
+        const dent = d.dents[n % d.dents.length];
+        for (const g of cm.dentable) {
+          const pos = g.attributes.position;
+          if (!g.userData.rest) g.userData.rest = pos.array.slice();          // исходная форма - один раз, к ремонту
+          DM.applyDent(pos.array, g.userData.rest, dent);
+        }
+        for (const m of cm.lights) {
+          const p3 = m.userData.p3, r3 = m.userData.r3;
+          DM.applyDent(p3, r3, dent);
+          m.position.set(p3[0], p3[1], p3[2]);
+          if (Math.hypot(p3[0] - r3[0], p3[1] - r3[1], p3[2] - r3[2]) > 0.12) m.visible = false;
+        }
+      }
+      for (const g of cm.dentable) { g.attributes.position.needsUpdate = true; g.computeVertexNormals(); }
+      cm.dentSeen = d.dentN;
+    }
+    if (cm.detSeen < d.detachN) {
+      cm.root.updateMatrixWorld(true);
+      for (let n = Math.max(cm.detSeen, d.detachN - d.detach.length); n < d.detachN; n++) {
+        const e = d.detach[n % d.detach.length], m = cm.parts[e.part];
+        if (!m || !m.visible) continue;
+        m.visible = false;
+        if (fx) {
+          dmgV.copy(m.userData.center); m.localToWorld(dmgV);
+          dmgQ.setFromRotationMatrix(cm.root.matrixWorld); dmgE.setFromQuaternion(dmgQ, 'YXZ');
+          const slot = fx.sim.spawn(dmgV.x, dmgV.y, dmgV.z, e.vx, e.vy, e.vz, e.part, dmgE.y);
+          fx.sim.list[slot].hint = c.pr ? c.pr.i : 0;
+          // своя копия геометрии (по центру детали) и материала: обломок живёт дольше машины, если её уберут
+          const old = fx.meshes[slot]; if (old) { fx.scene.remove(old); old.geometry.dispose(); old.material.dispose(); }
+          const g = m.geometry.clone(); g.translate(-m.userData.center.x, -m.userData.center.y, -m.userData.center.z);
+          const dm = new THREE.Mesh(g, m.material.clone()); dm.castShadow = false; dm.userData.debris = e.part; dm.userData.car = true;      // часть машины: проверки твёрдости мира её не считают
+          fx.scene.add(dm); fx.meshes[slot] = dm;
+        }
+      }
+      cm.detSeen = d.detachN;
+    }
+    // смятая зона - деталь на ней перекошена и «висит», пока не оторвалась
+    const z = d.zone, bf = cm.parts.bumperF, br = cm.parts.bumperR, hd = cm.parts.hood;
+    if (bf && bf.visible) { bf.rotation.x = z.front * 0.25; bf.position.y = -z.front * 0.06; }
+    if (br && br.visible) { br.rotation.x = -z.rear * 0.25; br.position.y = -z.rear * 0.06; }
+    if (hd && hd.visible) hd.rotation.z = (z.left - z.right) * 0.05;
+  };
+  // Обломки сцены: пул DriftDamage.Debris + меши по местам пула. ground(x, z, y, d) - высота земли.
+  R.debrisFx = function (scene, ground) {
+    const DM = window.DriftDamage;
+    return { scene, ground, sim: new DM.Debris(24, 12), meshes: new Array(24).fill(null) };
+  };
+  R.debrisUpdate = function (fx, dt, cars) {
+    if (!fx || !fx.sim.n) return;
+    fx.sim.update(dt, fx.ground, cars);
+    const L = fx.sim.list;
+    for (let i = 0; i < L.length; i++) {
+      const m = fx.meshes[i]; if (!m) continue;
+      const d = L[i];
+      if (!d.on) { m.visible = false; continue; }
+      m.visible = true; m.position.set(d.x, d.y, d.z); m.rotation.set(d.rx, d.ry, d.rz, 'YXZ'); m.scale.setScalar(d.scale);
+    }
+  };
+  R.debrisDispose = function (fx) {
+    if (!fx) return;
+    for (let i = 0; i < fx.meshes.length; i++) { const m = fx.meshes[i]; if (m) { fx.scene.remove(m); m.geometry.dispose(); m.material.dispose(); fx.meshes[i] = null; } }
+    fx.sim.clear();
+  };
   R.buildCar = buildCar;
   function disposeCar(cm) {
     if (!cm) return;
@@ -952,7 +1099,19 @@
     if (theme.snowfall) { snow = particleSystem(400); scene.add(snow.pts); }
     // твёрдая обстановка трассы для штанги камеры: стены, рельеф, предметы (не небо, не вода, не полотно, не машины)
     const carRoots = new Set(cars.map((c) => c.root)), solids = scene.children.filter((o) => (o.isMesh || o.isInstancedMesh) && o !== water && !carRoots.has(o) && !(o.material && o.material.side === THREE.BackSide) && !(o.material && o.material.transparent));
-    R.race = { race, scene, sun, hemi, cars, arch, parts, skids, snow, water, headlight, theme, ctx, poles, solids, cam: { x: 0, y: 0, z: 0, init: false, fov: 62, shake: 0 }, time: 0 };
+    // обломки отлетевших деталей: лежат на полотне, у стены отскакивают обратно на дорогу
+    const dq = {};
+    const debris = R.debrisFx(scene, (x, z, y, d) => {
+      const pr = C.project(tr, x, z, d.hint, dq); d.hint = pr.i;
+      const lim = tr.W - 0.3;
+      if (Math.abs(pr.d) > lim) {
+        const sg = pr.d > 0 ? 1 : -1, over = Math.abs(pr.d) - lim, vn = d.vx * pr.nx + d.vz * pr.nz;
+        d.x -= pr.nx * sg * over; d.z -= pr.nz * sg * over;
+        if (vn * sg > 0) { d.vx -= 1.5 * vn * pr.nx; d.vz -= 1.5 * vn * pr.nz; }
+      }
+      return pr.y + 0.02;
+    });
+    R.race = { race, scene, sun, hemi, cars, arch, parts, skids, snow, water, headlight, theme, ctx, poles, solids, debris, cam: { x: 0, y: 0, z: 0, init: false, fov: 62, shake: 0 }, time: 0 };
     R.applySettings(s);
     await prog(1, 'Готово');
     return R.race;
@@ -960,6 +1119,7 @@
 
   R.disposeRace = function () {
     if (!R.race) return;
+    R.debrisDispose(R.race.debris);
     for (const cm of R.race.cars) disposeCar(cm);
     // карта теней солнца и фары - свои текстуры, без dispose они копились с каждым заездом
     if (R.race.sun) R.race.sun.dispose();
@@ -998,8 +1158,10 @@
       cm.root.rotation.x = -Math.atan2(tr.y[j] - tr.y[i], Math.max(1, tr.s[j] - tr.s[i] || 6)) * Math.cos(h - Math.atan2(tr.tx[i], tr.tz[i]));
       cm.root.rotation.order = 'YXZ';
       cm.spin += c.vLong * dt / cm.S.wr;
-      for (const w of cm.wheels) { w.spin.rotation.x = cm.spin; if (w.front) w.pivot.rotation.y = c.steer; }
+      const toe = c.dmgFx ? c.dmgFx.pull : 0;                 // погнутая подвеска - колесо видно повёрнутым
+      for (const w of cm.wheels) { w.spin.rotation.x = cm.spin; if (w.front) w.pivot.rotation.y = c.steer + toe; }
       cm.tailMat.emissiveIntensity = c.braking ? 2.4 : 0.6;
+      if (c.dmg) R.damageSync(cm, c, X.debris);
       if (c.ghost > 0) cm.root.visible = cm.root.visible && Math.floor(X.time * 12) % 2 === 0;
       // дым, пыль, снег из-под колёс
       const skid = Math.max(c.skidR, c.skidF * 0.6);
@@ -1008,21 +1170,24 @@
       const rearZ = -cm.L / 2 + cm.S.ax[0], hw = cm.W / 2 - 0.15;
       const wl = [[x + cs * hw + sn * rearZ, z - sn * hw + cs * rearZ], [x - cs * hw + sn * rearZ, z + sn * hw + cs * rearZ]];
       const pr = s.particles === 'low' ? 0.35 : s.particles === 'medium' ? 0.65 : 1;
-      if ((skid > 0.35 || (loose && c.speed > 8)) && Math.random() < pr) {
+      // стёртые задние шины дымят раньше и гуще (повреждения «полные»)
+      const wr = c.dmgFx ? (c.dmg.wear[2] + c.dmg.wear[3]) / 2 : 0;
+      if ((skid > 0.35 - 0.15 * wr || (loose && c.speed > 8)) && Math.random() < pr) {
         const surfCol = c.surf === 'snow' || tr.runoffSurf === 'snowbank' && c.onRunoff ? [0.95, 0.97, 1] : loose ? (c.surf === 'gravel' ? [0.62, 0.53, 0.42] : [0.85, 0.74, 0.55]) : [0.86, 0.86, 0.88];
         for (const wp of wl) emit(X.parts, wp[0], c.y + 0.3, wp[1], -c.vx * 0.12 + (Math.random() - 0.5) * 2, 0.8 + Math.random(), -c.vz * 0.12 + (Math.random() - 0.5) * 2,
-          loose ? 1.0 : 1.2, loose ? 2.2 : 3, loose ? 0.8 : 1.3, surfCol[0], surfCol[1], surfCol[2], Math.min(0.42, 0.14 + skid * 0.3));
+          loose ? 1.0 : 1.2, loose ? 2.2 : 3, loose ? 0.8 : 1.3, surfCol[0], surfCol[1], surfCol[2], Math.min(0.42, 0.14 + skid * 0.3) * (1 + 0.8 * wr));
       }
       if (c.nitroOn && Math.random() < pr) {
         const ex = x + sn * (-cm.L / 2 - 0.1), ez = z + cs * (-cm.L / 2 - 0.1);
         emit(X.parts, ex, c.y + 0.45, ez, -sn * 6 + c.vx * 0.8, 0.2, -cs * 6 + c.vz * 0.8, 0.28, -0.6, 0.12, 1, 0.55 + Math.random() * 0.3, 0.2, 0.85);
       }
-      if (skid > 0.45 && !loose) {
+      if (skid > 0.45 - 0.15 * wr && !loose) {
         if (cm.lastWheels) for (let q = 0; q < 2; q++) addSkid(X.skids, cm.lastWheels[q][0], c.y + 0.03, cm.lastWheels[q][1], wl[q][0], c.y + 0.03, wl[q][1], 0.26);
         cm.lastWheels = wl;
       } else cm.lastWheels = null;
     });
     updateParticles(X.parts, dt);
+    R.debrisUpdate(X.debris, dt, race.cars);
     if (X.snow) {
       for (let k = 0; k < 6; k++) emit(X.snow, R.camera.position.x + (Math.random() - 0.5) * 80, R.camera.position.y + 25, R.camera.position.z + (Math.random() - 0.5) * 80, 0, -4, 0, 0.35, 0, 6, 1, 1, 1, 0.9);
       updateParticles(X.snow, dt);

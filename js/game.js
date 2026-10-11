@@ -7,7 +7,7 @@
     document.body.innerHTML = '<div style="padding:40px;color:#fff;font-family:sans-serif;background:#220000;height:100vh"><h2>Не загрузилась библиотека three.js</h2><p>Файл vendor/three.min.js должен лежать рядом со страницей.</p></div>';
     return;
   }
-  const D = window.DriftData, C = window.DriftCore, R = window.DriftRender, A = window.DriftAudio;
+  const D = window.DriftData, C = window.DriftCore, R = window.DriftRender, A = window.DriftAudio, DM = window.DriftDamage;
   const $ = (id) => document.getElementById(id);
   const params = new URLSearchParams(location.search);
   const FIXED_SEED = params.has('seed') ? (Number(params.get('seed')) || 1) : 0;
@@ -294,7 +294,10 @@
 
   // ======================= настройки =======================
   function setSetting(k, v) {
+    const was = G.settings[k];
     G.settings[k] = v;
+    // повреждения в открытом мире меняются сразу (машины чинятся и подключаются заново); в заезде - со следующего
+    if (k === 'damage' && v !== was && G.world) { for (const c of G.world.cars) G.world.attach(c); if (WR.world) { WR.dispose(); WR.init(G.world, G.settings); } }
     if (k === 'quality') {
       const q = D.QUALITY[v];
       G.settings.shadows = q.shadowMap > 0; G.settings.particles = q.particles; G.settings.drawDist = q.drawDist;
@@ -341,6 +344,8 @@
         + row('Антипробуксовка', onoff('tc')) + row('АБС', onoff('abs'), 'без АБС колёса блокируются, руль хуже слушается')
         + row('Помощь рулём', onoff('steerAssist'), 'меньше угол на скорости и подруливание в заносе')
         + row('Чувствительность руля', range('steerSens', 0.5, 1.6, 0.05))
+        + row('Повреждения', seg('damage', [['off', 'Выкл'], ['visual', 'Только вид'], ['full', 'Полные']]),
+          'только вид: вмятины и отлетающие детали, езда прежняя · полные: ещё стираются шины и удары портят управление; в карьере и заездах на время - только вид; ремонт: ' + kb('repair') + ' в свободной езде, фестиваль, новый заезд')
         + row('Прогресс карьеры', '<button class="danger" id="sReset">Сбросить прогресс…</button>', 'деньги, машины, медали');
     } else if (G.sTab === 'controls') {
       h = '<p class="note">Нажмите на клавишу, затем новую. Esc - отмена, Backspace - очистить. Если клавиша занята, действия поменяются клавишами.</p>';
@@ -404,18 +409,22 @@
       <li>${k('accel')} газ, ${k('brake')} тормоз и задний ход</li><li>${k('left')} ${k('right')} руль</li>
       <li>${k('handbrake')} ручник - сорвать заднюю ось в занос</li><li>${k('nitro')} нитро (копится в заносе)</li>
       <li>${k('camera')} камера: сзади, дальняя, с капота</li><li>${k('reset')} вернуться на трассу</li>
-      <li>${k('pause')} или <kbd>Esc</kbd> пауза</li><li>${k('shiftUp')} ${k('shiftDown')} передачи (ручная коробка)</li></ul>
+      <li>${k('pause')} или <kbd>Esc</kbd> пауза</li><li>${k('shiftUp')} ${k('shiftDown')} передачи (ручная коробка)</li><li>${k('repair')} ремонт в свободной езде</li></ul>
       <p>Клавиши меняются в «Настройках». Геймпад: стик - руль, курки - газ и тормоз.</p>
       <h3>Режимы</h3><ul><li><b>Гонка</b> - обгоните соперников, медаль за 1-3 место.</li><li><b>Дрифт</b> - очки за занос: шире угол и дольше серия - больше очков, множитель растёт до ×5. Удар о стену или машину срывает серию.</li>
       <li><b>На время</b> - один на трассе, медаль по времени.</li><li><b>Дуэль</b> - один на один с чемпионом кубка.</li><li><b>На вылет</b> - после каждого круга последний выбывает.</li></ul>
       <h3>Трасса</h3><ul><li>Голубая арка - следующий чекпоинт. Круг засчитывается, только если взяты все чекпоинты: срезать нельзя.</li>
       <li>Покрытие меняет сцепление: асфальт держит лучше всего, гравий хуже, снег хуже всего. Полноприводный «Буран» на гравии и снегу сильнее всех.</li>
       <li>Красная стрелка «Не туда» - вы едете против хода. ${k('reset')} вернёт на трассу.</li></ul>
+      <h3>Повреждения</h3><ul><li>«Настройки» → «Игра» → «Повреждения»: <b>выкл</b>, <b>только вид</b> (по умолчанию) или <b>полные</b>.</li>
+      <li>Сильный удар мнёт кузов в месте удара, слабое касание следа не оставляет. Зеркала, бамперы и капот отлетают и лежат на дороге 12 секунд.</li>
+      <li>«Полные»: шины стираются от торможения юзом, заносов и пробуксовки и держат хуже (до 30%); удар в переднее колесо уводит руль, смятый перед отнимает мощность. Справа внизу, рядом с нитро, - схема кузова и шин.</li>
+      <li>В карьере и заездах на время повреждения только видны: медали и рекорды - по одним правилам. Ремонт: новый заезд, фестиваль или ${k('repair')} в свободной езде.</li></ul>
       <h3>Карьера</h3><ul><li>5 кубков по 3-4 события. Медаль в каждом событии открывает следующий кубок.</li>
       <li>За места и медали платят. Деньги - на машины и тюнинг в «Гараже».</li><li>Выиграйте «Гран-при Горизонта» - станете чемпионом.</li></ul>
       <h3>Советы</h3><ul><li>Тормозите до поворота, газ - на выходе.</li><li>Для заноса: скорость, руль в поворот и короткий ручник, затем газом держите угол.</li>
       <li>Без антипробуксовки заднеприводные машины легко идут боком.</li><li>Мощность мало решает, если шины не держат: ставьте «Шины» и «Подвеску».</li></ul>
-      <h3>Об игре</h3><p>Horizon Drift - фан-концепт, не связан с Microsoft/Playground Games. Все машины, трассы, гонщики и названия выдуманы. Модели, текстуры, звук и музыка сделаны кодом прямо в игре.</p>`;
+      <h3>Об игре</h3><p>Horizon Drift ${D.VERSION} - фан-концепт, не связан с Microsoft/Playground Games. Все машины, трассы, гонщики и названия выдуманы. Модели, текстуры, звук и музыка сделаны кодом прямо в игре.</p>`;
   }
 
   // ======================= победа =======================
@@ -472,6 +481,9 @@
     let race;
     try {
       race = new C.Race(cfg);
+      // повреждения: в карьере и на время - не больше «только вид» (медали и рекорды - по одним правилам с эталонным ботом)
+      race.damageMode = DM.modeFor(G.settings.damage, meta.kind, cfg.mode);
+      for (const c of race.cars) DM.attach(c, race.damageMode);
       const looks = cfg.entries.map((e) => e.look || C.defaultLook(e.car));
       G.buildCount = (G.buildCount || 0) + 1;
       await R.buildRace(race, looks, (p) => { $('loadBar').style.width = Math.round(p * 100) + '%'; });
@@ -622,11 +634,24 @@
     $('hNitroBar').style.height = `calc((100% - 6px) * ${pl.nitro.toFixed(3)})`;
     $('hNitroBar').style.opacity = pl.nitroOn ? '1' : pl.nitroLock ? '0.35' : '0.8';        // пустой баллон тусклый, пока не наберёт 10%
     $('hWrong').style.display = pl.wrong && !pl.finished ? 'block' : 'none';
+    drawDamage(pl);
     const cd = $('hCount');
     if (race.phase === 'countdown') { cd.style.display = 'block'; setText('hCount', String(Math.ceil(race.countdown))); }
     else if (race.t < 0.8) { cd.style.display = 'block'; setText('hCount', 'СТАРТ!'); } else cd.style.display = 'none';
     drawSpeedo(pl); drawMap(race);
     if (G.settings.showFps) setText('hFps', G.fps + ' FPS');
+  }
+  // повреждения на HUD (только «полные»): зоны кузова и шины - цветом от зелёного к красному
+  const dmgCol = (v) => `hsl(${Math.round(120 * (1 - C.clamp(v, 0, 1)))},80%,${v > 0.02 ? 50 : 42}%)`;
+  function drawDamage(p) {
+    const d = p && p.dmgFx ? p.dmg : null, el = $('hDmg');
+    if (!d) { if (hudCache.hDmg !== 'off') { hudCache.hDmg = 'off'; el.style.display = 'none'; } return; }
+    const z = d.zone, w = d.wear, key = [z.front, z.rear, z.left, z.right, w[0], w[1], w[2], w[3]].map((v) => Math.round(v * 40)).join(',');
+    if (hudCache.hDmg === key) return;
+    hudCache.hDmg = key; el.style.display = 'block';
+    $('dZf').setAttribute('fill', dmgCol(z.front)); $('dZr').setAttribute('fill', dmgCol(z.rear)); $('dZl').setAttribute('fill', dmgCol(z.left)); $('dZR').setAttribute('fill', dmgCol(z.right));
+    for (let i = 0; i < 4; i++) $('dW' + i).setAttribute('fill', dmgCol(w[i]));
+    $('hDmgTxt').textContent = 'ШИНЫ ' + Math.round(100 * (1 - (w[0] + w[1] + w[2] + w[3]) / 4)) + '%';
   }
   // полосы скорости по краям экрана
   function drawFx(pl) {
@@ -1004,7 +1029,8 @@
       await new Promise((r) => setTimeout(r, 0));
       const save = loadWorldSave(def.id); if (fromFest) save.pos = null; save.car = carId;
       if (G.world && G.world.M.id !== def.id) quitWorld(true);
-      G.world = new WD.World({ map: def.id, car: carId, upg: G.career.d.upg[carId], look: G.career.look(carId), save, seed: nextSeed(), assist: playerAssist() });
+      G.world = new WD.World({ map: def.id, car: carId, upg: G.career.d.upg[carId], look: G.career.look(carId), save, seed: nextSeed(), assist: playerAssist(),
+        attach: (c) => DM.attach(c, DM.modeFor(G.settings.damage, 'world', 'free')) });
       $('loadBar').style.width = '60%';
       await new Promise((r) => setTimeout(r, 0));
       WR.init(G.world, G.settings);
@@ -1057,6 +1083,7 @@
         case 'discover': if (e.point.type !== 'board' && performance.now() - discMsgT > 2500) { discMsgT = performance.now(); showMsg('Открыто: ' + e.point.name, 'точка появилась на карте', 1400); } break;
         case 'water': showMsg('Машина в воде', 'возвращаем на дорогу', 1400); break;
         case 'reset': showMsg('Снова на дороге', '', 900); break;
+        case 'repair': A.play('buy'); showMsg('Машина отремонтирована', 'кузов, детали и шины как новые', 1300); break;
         case 'comboLost': A.play('lost'); showMsg('Комбо сорвано!', '', 1100); break;
         default: break;
       }
@@ -1098,6 +1125,7 @@
     setText('wMoney', money(G.career.money));
     $('hNitroBar').style.height = `calc((100% - 6px) * ${p.nitro.toFixed(3)})`;
     $('hNitroBar').style.opacity = p.nitroOn ? '1' : p.nitroLock ? '0.35' : '0.8';
+    drawDamage(p);
     const dr = w.drift, showDrift = w.zone && dr.active && dr.pending > 0;
     $('hDrift').style.display = w.zone ? 'block' : 'none';
     if (w.zone) { setText('hDriftPts', (showDrift ? '+' + dr.pending.toLocaleString('ru-RU') : (dr.total || 0).toLocaleString('ru-RU'))); setText('hDriftMul', '×' + dr.mult); $('hDriftGrace').style.width = Math.round((1 - dr.grace / 1.2) * 100) + '%'; }
@@ -1187,6 +1215,8 @@
     G.overlay = 'hub'; $('scrHub').classList.add('show');
     const list = $('hubList'); list.innerHTML = '';
     if (pt.type === 'fest') {
+      // фестиваль - он же гараж мира: машина чинится, если было что чинить
+      const pd = G.world.player.dmg; if (pd && (pd.hits || pd.wear.some((x) => x > 0.005))) G.world.repairPlayer();
       $('hubTitle').textContent = 'Фестиваль'; $('hubAbout').textContent = 'Смените машину, погоду и время суток. Здесь же появляетесь после «С фестиваля».';
       const row = (label, el) => { const d = document.createElement('div'); d.className = 'row'; d.innerHTML = `<span>${label}</span>`; d.appendChild(el); list.appendChild(d); };
       const cars = document.createElement('div'); cars.className = 'seg';
@@ -1211,6 +1241,7 @@
     if (!G.career.owns(id)) return;
     const w = G.world, p = w.player, st = C.carStats(id, G.career.d.upg[id]);
     p.st = st; p.carId = id; p.look = G.career.look(id); w.save.car = id;
+    if (p.dmg) p.dmg.repair();                      // другая машина из гаража - целая
     WR.dispose(); WR.init(w, G.settings); saveWorld();
   }
   async function startFromWorld(fn) {
@@ -1321,6 +1352,7 @@
       if (w.nearRival) { startWorldDuel(w.nearRival); return true; }
     }
     if (act === 'reset' && !e.repeat) { w.resetPlayer(); WR.cam.init = false; return true; }
+    if (act === 'repair' && !e.repeat) { if (!w.repairPlayer()) showMsg('Повреждения выключены', 'включаются в «Настройках» → «Игра»', 1300); return true; }
     return false;
   }
 

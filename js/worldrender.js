@@ -161,6 +161,9 @@
     const pc = R._.capture(() => ({ snow: R._.particleSystem(900), parts: R._.particleSystem({ low: 300, medium: 700, high: 1400 }[settings.particles] || 700), skids: R._.skidSystem(1600) }));
     W.snowP = pc.r.snow; W.parts = pc.r.parts; W.skids = pc.r.skids; W.owned.push(...pc.owned);
     scene.add(W.snowP.pts); scene.add(W.parts.pts); scene.add(W.skids.mesh); ghost(W.skids.mesh, 'flat');
+    // обломки отлетевших деталей (повреждения): лежат на земле по той же функции высоты, что у физики
+    const dg = {};
+    W.debris = R.debrisFx(scene, (x, z, y) => M.groundAt(x, z, dg, y).y);
     // точки мира
     W.markers = buildMarkers(M, world);
     scene.add(W.markers.group);
@@ -629,6 +632,8 @@
       const cp = R._.capture(() => R._.buildCar(c.carId, look, { own: true }));
       const cm = cp.r; cm.owned = cp.owned; cm.roll = 0; cm.pitch = 0; cm.spin = 0;
       cm.root.traverse((o) => { if (o.isMesh && o !== cm.blob) o.castShadow = c.isPlayer; o.userData.car = true; });
+      // мир нарисован заново (после гонки, смены машины): вмятины лягут снова, а оторванные детали - просто без обломков
+      if (c.dmg) { cm.repairs = c.dmg.repairs; cm.detSeen = c.dmg.detachN; for (const k in cm.parts) cm.parts[k].visible = !c.dmg.off[k]; }
       W.scene.add(cm.root); W.carMeshes.set(c, cm);
     }
     if (W.carMeshes.size > world.cars.length) {
@@ -714,18 +719,22 @@
       const k2 = 1 - Math.exp(-dt * 8);
       cm.roll += (C.clamp(-(c.w || 0) * (c.speed || 0) * 0.006, -0.07, 0.07) - cm.roll) * k2; cm.body.rotation.z = cm.roll;
       cm.spin += (c.vLong || 0) * dt / cm.S.wr;
-      for (const w of cm.wheels) { w.spin.rotation.x = cm.spin; if (w.front) w.pivot.rotation.y = c.steer; }
+      const toe = c.dmgFx ? c.dmgFx.pull : 0;
+      for (const w of cm.wheels) { w.spin.rotation.x = cm.spin; if (w.front) w.pivot.rotation.y = c.steer + toe; }
+      if (c.dmg) R.damageSync(cm, c, W.debris);
       cm.tailMat.emissiveIntensity = c.braking ? 2.4 : 0.6;
       cm.headMat.emissiveIntensity = 1.2 + dark * 1.8;
       cm.root.visible = !((camMode === 'hood' || camMode === 'cockpit') && c === p && !W.photo);
       const skid = Math.max(c.skidR || 0, (c.skidF || 0) * 0.6), loose = c.surf !== 'asphalt' && c.surf !== 'concrete';
-      if (!c.air && (skid > 0.35 || (loose && c.speed > 9)) && Math.random() < 0.8 && Math.abs(x - p.x) + Math.abs(z - p.z) < 160) {
+      const wr = c.dmgFx ? (c.dmg.wear[2] + c.dmg.wear[3]) / 2 : 0;           // стёртые шины дымят раньше и гуще
+      if (!c.air && (skid > 0.35 - 0.15 * wr || (loose && c.speed > 9)) && Math.random() < 0.8 && Math.abs(x - p.x) + Math.abs(z - p.z) < 160) {
         const rz = -cm.L / 2 + cm.S.ax[0], hw = cm.W / 2 - 0.15, sn = Math.sin(h), cs = Math.cos(h);
         const r0 = c.surf === 'snow' ? 0.95 : c.surf === 'sand' ? 0.85 : loose ? 0.6 : 0.86, g0 = c.surf === 'snow' ? 0.97 : c.surf === 'sand' ? 0.74 : loose ? 0.52 : 0.86, b0 = c.surf === 'snow' ? 1 : c.surf === 'sand' ? 0.55 : loose ? 0.4 : 0.88;
-        for (let sd = -1; sd <= 1; sd += 2) R._.emit(W.parts, x + cs * hw * sd + sn * rz, y + 0.3, z - sn * hw * sd + cs * rz, -c.vx * 0.12 + (Math.random() - 0.5) * 2, 0.8, -c.vz * 0.12 + (Math.random() - 0.5) * 2, 1.1, 2.5, 1.0, r0, g0, b0, Math.min(0.42, 0.14 + skid * 0.3));
+        for (let sd = -1; sd <= 1; sd += 2) R._.emit(W.parts, x + cs * hw * sd + sn * rz, y + 0.3, z - sn * hw * sd + cs * rz, -c.vx * 0.12 + (Math.random() - 0.5) * 2, 0.8, -c.vz * 0.12 + (Math.random() - 0.5) * 2, 1.1, 2.5, 1.0, r0, g0, b0, Math.min(0.42, 0.14 + skid * 0.3) * (1 + 0.8 * wr));
       }
     }
     R._.updateParticles(W.parts, dt);
+    R.debrisUpdate(W.debris, dt, world.cars);
     // точки: флаги, лучи, таблички к камере, разбитые щиты
     for (const a of W.markers.anim) {
       if (a.bill) a.m.lookAt(R.camera.position.x, a.m.position.y, R.camera.position.z);
@@ -832,6 +841,7 @@
 
   W.dispose = function () {
     if (!W.scene) return;
+    R.debrisDispose(W.debris); W.debris = null;
     for (const ch of W.chunks.values()) disposeChunk(ch);
     W.chunks.clear(); W.job = null;
     for (const [, cm] of W.carMeshes) { R._.disposeCar(cm); for (const o of cm.owned) if (o.dispose) o.dispose(); }

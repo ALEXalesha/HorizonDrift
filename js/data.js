@@ -214,11 +214,12 @@
     { id: 'right', name: 'Руль вправо' }, { id: 'handbrake', name: 'Ручник' }, { id: 'nitro', name: 'Нитро' },
     { id: 'shiftUp', name: 'Передача вверх' }, { id: 'shiftDown', name: 'Передача вниз' }, { id: 'camera', name: 'Камера' },
     { id: 'reset', name: 'Вернуться на трассу' }, { id: 'pause', name: 'Пауза (и Esc)' }, { id: 'lookBack', name: 'Взгляд назад' },
+    { id: 'repair', name: 'Ремонт (свободная езда)' },
   ];
   const DEFAULT_BINDINGS = {
     accel: ['KeyW', 'ArrowUp'], brake: ['KeyS', 'ArrowDown'], left: ['KeyA', 'ArrowLeft'], right: ['KeyD', 'ArrowRight'],
     handbrake: ['Space', ''], nitro: ['ShiftLeft', 'ShiftRight'], shiftUp: ['KeyE', ''], shiftDown: ['KeyQ', ''],
-    camera: ['KeyC', ''], reset: ['KeyR', ''], pause: ['KeyP', ''], lookBack: ['KeyV', ''],
+    camera: ['KeyC', ''], reset: ['KeyR', ''], pause: ['KeyP', ''], lookBack: ['KeyV', ''], repair: ['KeyG', ''],
   };
 
   const DEFAULT_SETTINGS = {
@@ -226,6 +227,7 @@
     bindings: DEFAULT_BINDINGS, steerSens: 1, gearbox: 'auto', tc: true, abs: true, steerAssist: true,
     quality: 'high', shadows: true, drawDist: 'far', particles: 'high', showFps: false, camera: 'chase', motionBlur: true,
     gamepad: true, deadzone: 0.15, lookSens: 1, invertY: false,
+    damage: 'visual',             // повреждения: 'off' | 'visual' (вмятины и детали, физика прежняя) | 'full'
   };
   const QUALITY = {
     low: { pixelRatio: 0.75, shadowMap: 0, decor: 0.35, particles: 'low', drawDist: 'near', aa: false },
@@ -237,7 +239,9 @@
   const DIFFICULTY = { easy: { name: 'Легко', pace: -0.07, mistakes: 0.05 }, normal: { name: 'Нормально', pace: 0, mistakes: 0.025 },
     hard: { name: 'Сложно', pace: 0.05, mistakes: 0.008 } };
 
-  return { CARS, BODY, UPGRADES, UPG_MAX, UPG_PRICE, TIER_MUL, SURF, TRACKS, THEMES, CUPS, EVENT_TYPES, BASE_REWARD, PLACE_SHARE,
+  const VERSION = '1.1.0';        // версия игры (README, CHANGELOG, «Помощь» → «Об игре»)
+
+  return { VERSION, CARS, BODY, UPGRADES, UPG_MAX, UPG_PRICE, TIER_MUL, SURF, TRACKS, THEMES, CUPS, EVENT_TYPES, BASE_REWARD, PLACE_SHARE,
     MEDAL_SHARE, DRIVERS, RIVALS, PAINTS, RIMS, RIM_COLORS, LIVERIES, ACTIONS, DEFAULT_BINDINGS, DEFAULT_SETTINGS, QUALITY,
     DRAW_DIST, DIFFICULTY };
 });

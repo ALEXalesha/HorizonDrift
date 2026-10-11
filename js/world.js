@@ -933,7 +933,8 @@
   }
 
   class World {
-    // opts: { map, car, upg, look, save, seed, assist, traffic }
+    // opts: { map, car, upg, look, save, seed, assist, traffic, attach } - attach(car) вызывается для каждой новой машины
+    // (так игра подключает повреждения; без attach физика та же, что была)
     constructor(opts) {
       this.M = buildMap(opts.map);
       this.save = opts.save || newSave(this.M.id);
@@ -942,6 +943,8 @@
       this.drift = new C.DriftScorer(); this.zone = null; this.radarPass = null; this.jump = null;
       const c = C.makeCar(C.carStats(opts.car, opts.upg), { name: 'Вы', isPlayer: true, look: opts.look });
       if (opts.assist) Object.assign(c.assist, opts.assist);
+      this.attach = opts.attach || null;
+      if (this.attach) this.attach(c);
       this.player = c;
       this.cars = [c];
       this.g = {}; this.tick = 0; this.nearHub = null; this.nearRival = null;
@@ -996,6 +999,8 @@
     }
     placeAtPoint(pid) { const p = this.M.pointById(pid); if (!p) return; if (p.type === 'fest') { const i = p.i; this.placeAt(this.M.X[i], this.M.Z[i]); } else this.placeAt(p.x, p.z); }
     resetPlayer() { const c = this.player; this.placeAt(c.x, c.z, c.h); this.events.push({ type: 'reset' }); }
+    // Ремонт машины игрока (клавиша, фестиваль, смена машины): вмятины, детали, шины.
+    repairPlayer() { const d = this.player.dmg; if (!d) return false; d.repair(); this.events.push({ type: 'repair' }); return true; }
     // Быстрое перемещение: только к открытым точкам.
     fastTravel(pid) {
       if (!this.save.disc[pid]) return false;
@@ -1028,6 +1033,7 @@
       const sp = cruise * 0.6; c.vx = Math.sin(c.h) * sp; c.vz = Math.cos(c.h) * sp;
       const a = { car: c, edge: e.id, dir, i, cruise, rival: !!rival, name, cool: 0, id: (this.aiId = (this.aiId || 0) + 1) };
       c.world = a; c.rival = !!rival;
+      if (this.attach) this.attach(c);
       this.cars.push(c);
       return a;
     }
@@ -1174,7 +1180,7 @@
       c.surf = g0.surf; c.onRunoff = !g0.onRoad;
       c.gripMul = weatherOf(this.save.weather).grip[g0.surf] || 1;
       const yPrev = c.y;
-      if (!c.air) C.stepCar(c, dt, g0.surf);
+      if (!c.air) { C.stepCar(c, dt, g0.surf); if (c.dmg) c.dmg.step(c, dt); }   // износ шин (damage.js) только читает скольжения
       else { c.x += c.vx * dt; c.z += c.vz * dt; c.h -= c.w * dt; c.w *= 1 - dt * 0.5; c.speed = Math.hypot(c.vx, c.vz); c.skidR = c.skidF = 0; }
       let g1 = M.groundAt(c.x, c.z, g, c.y);
       // уступ выше, чем может взять колесо (бок рампы, обрыв вверх), - стенка, а не подъём
@@ -1185,7 +1191,10 @@
       if (!c.air && !upRamp && (rise > 0.45 + 0.6 * moved || steep)) {
         const gx = c.x - x0, gz = c.z - z0, l = moved || 1, nx = -gx / l, nz = -gz / l;
         c.x = x0; c.z = z0; const vn = c.vx * nx + c.vz * nz;
-        if (vn < 0) { c.vx -= 1.3 * vn * nx; c.vz -= 1.3 * vn * nz; c.w *= 0.5; c.hit = Math.max(c.hit || 0, -vn); }
+        if (vn < 0) {
+          c.vx -= 1.3 * vn * nx; c.vz -= 1.3 * vn * nz; c.w *= 0.5; c.hit = Math.max(c.hit || 0, -vn);
+          if (c.dmg) { const hl = (c.st.len || 4.3) / 2; c.dmg.hit(c, c.x - nx * hl, c.z - nz * hl, nx, nz, -1.3 * vn * c.st.mass); }
+        }
         g1 = M.groundAt(c.x, c.z, g, c.y);
       }
       if (!c.air) {

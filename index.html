@@ -181,6 +181,10 @@
   #hNitro { right: 256px; bottom: 34px; width: 22px; height: 150px; padding: 3px; }
   #hNitro i { position: absolute; left: 3px; right: 3px; bottom: 3px; border-radius: 8px; background: linear-gradient(0deg, #1f7bff, var(--cyan)); }
   #hNitro span { position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%); font-size: 9px; color: #fff; letter-spacing: 0; background: rgba(10, 9, 18, 0.8); border: 1px solid rgba(25, 211, 255, 0.5); padding: 1px 3px; border-radius: 5px; }
+  /* повреждения «полные»: зоны кузова и четыре шины (зелёный - целое, красный - смято или стёрто) */
+  #hDmg { right: 290px; bottom: 34px; width: 58px; height: 104px; padding: 3px; display: none; }
+  #hDmg svg { width: 100%; height: 100%; display: block; }
+  #hDmg span { position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%); font-size: 9px; color: #fff; letter-spacing: 0; background: rgba(10, 9, 18, 0.8); border: 1px solid rgba(255, 176, 46, 0.5); padding: 1px 3px; border-radius: 5px; white-space: nowrap; }
   #hDrift { top: 92px; left: 50%; transform: translateX(-50%); text-align: center; padding: 8px 22px; display: none; }
   #hDrift .pts { font-size: 34px; font-weight: 800; color: #ff5ad8; text-shadow: 0 0 18px rgba(255, 90, 216, 0.6); font-variant-numeric: tabular-nums; }
   #hDrift .mul { font-size: 20px; color: var(--acc2); margin-left: 6px; }
@@ -260,7 +264,7 @@
   @media (max-height: 760px) {
     .screen { padding: 14px 20px; }
     .head { margin-bottom: 8px; } .head h2 { font-size: 24px; }
-    #hSpeedo { width: 190px; height: 190px; } #hNitro { right: 214px; height: 120px; }
+    #hSpeedo { width: 190px; height: 190px; } #hNitro { right: 214px; height: 120px; } #hDmg { right: 244px; height: 96px; }
     #hKeys { font-size: 11px; }
     #hMap { width: 160px; height: 160px; } #hFps { top: 182px; }
     #gPanel { width: 340px; } #gCarsWrap { width: 220px; }
@@ -383,6 +387,13 @@
   <div class="hbox" id="hMap"><canvas id="hMapC" width="190" height="190"></canvas></div>
   <div class="hbox" id="hSpeedo"><canvas id="hSpeedC" width="230" height="230"></canvas></div>
   <div class="hbox" id="hNitro"><span>НИТРО</span><i id="hNitroBar"></i></div>
+  <div class="hbox" id="hDmg" title="Повреждения: кузов и износ шин"><svg viewBox="0 0 60 100">
+    <rect x="15" y="10" width="30" height="80" rx="7" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.35)" stroke-width="1.2"/>
+    <rect id="dZf" x="17" y="12" width="26" height="12" rx="4"/><rect id="dZr" x="17" y="76" width="26" height="12" rx="4"/>
+    <rect id="dZl" x="17" y="28" width="6" height="44" rx="2"/><rect id="dZR" x="37" y="28" width="6" height="44" rx="2"/>
+    <rect id="dW0" x="5" y="18" width="8" height="18" rx="2"/><rect id="dW1" x="47" y="18" width="8" height="18" rx="2"/>
+    <rect id="dW2" x="5" y="64" width="8" height="18" rx="2"/><rect id="dW3" x="47" y="64" width="8" height="18" rx="2"/>
+  </svg><span id="hDmgTxt">ШИНЫ 100%</span></div>
   <div class="hbox" id="hDrift"><div class="lbl2">ДРИФТ</div><span class="pts" id="hDriftPts">0</span><span class="mul" id="hDriftMul">×1</span><div class="grace" id="hDriftGrace"></div></div>
   <div id="hMsg"></div>
   <div id="hCount"></div>
@@ -434,6 +445,7 @@
 <script src="vendor/three.min.js"></script>
 <script src="js/data.js"></script>
 <script src="js/core.js"></script>
+<script src="js/damage.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/render.js"></script>
 <script src="js/cockpit.js"></script>
