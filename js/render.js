@@ -143,7 +143,7 @@
   }
   // Кузов: выдавливаем силуэт на ширину, ставим носом в +z и считаем развёртку под рисунок:
   // верх текстуры - вид сбоку, низ - вид сверху.
-  function bodyGeom(pts, L, W, H) {
+  function bodyGeom(pts, L, W, H, maxLen) {
     const g = extrude(pts, W - 0.1, 0.05);
     g.translate(-L / 2, 0, -(W - 0.1) / 2);
     g.rotateY(-Math.PI / 2);
@@ -162,9 +162,15 @@
       }
     }
     g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-    const t = tessellate(g, 0.22); g.dispose();
+    if (!maxLen) { g.computeVertexNormals(); return g; }
+    const t = tessellate(g, maxLen); g.dispose();
     t.computeVertexNormals();
     return t;
+  }
+  function cabGeom(S, L, W, maxLen) {
+    const g = extrude(S.cabin, W - 0.34, 0.04); g.translate(-L / 2, 0, -(W - 0.34) / 2); g.rotateY(-Math.PI / 2);
+    if (!maxLen) { g.computeVertexNormals(); return g; }
+    const t = tessellate(g, maxLen); g.dispose(); t.computeVertexNormals(); return t;
   }
   // Мелкие треугольники для вмятин (повреждения): силуэт кузова выдавлен большими гранями - у носа всего две
   // вершины по ширине, и вмятине в середине нечего двигать. Длинная сторона делится пополам, пока не станет
@@ -193,9 +199,23 @@
     t.setAttribute('uv', new THREE.Float32BufferAttribute(outU, 2));
     return t;
   }
-  // Кузов одной формы строится один раз: мелкая сетка для вмятин дороже простого выдавливания; машине - копия.
+  // Кузов одной формы строится один раз; машине - копия. Мелкая сетка (для вмятин) - только у битой машины:
+  // у целой простое выдавливание, иначе каждая машина трафика - 8-9 тыс. лишних треугольников, и в салоне
+  // (зеркала рисуют сцену ещё раз) после перемещения на фестиваль кадров становилось вдвое меньше (замер 11.10).
   const geoProto = {};
   function protoGeo(key, make) { if (!geoProto[key]) geoProto[key] = make(); return geoProto[key].clone(); }
+  function carShell(shapeKey, fine) {
+    const S = SHAPES[shapeKey], L = S.L, W = S.W, H = Math.max.apply(null, S.lower.map((p) => p[1]));
+    return [protoGeo((fine ? 'bodyT:' : 'body:') + shapeKey, () => bodyGeom(S.lower, L, W, H, fine ? 0.22 : 0)),
+      protoGeo((fine ? 'cabT:' : 'cab:') + shapeKey, () => cabGeom(S, L, W, fine ? 0.3 : 0))];
+  }
+  // Первая вмятина: кузов и кабина меняются на мелкую сетку той же формы (вершины те же, только чаще).
+  function fineShell(cm) {
+    if (cm.fine) return;
+    cm.fine = true;
+    const gs = carShell(cm.shapeKey, true);
+    for (let k = 0; k < 2; k++) { const m = cm.shell[k], old = m.geometry; m.geometry = gs[k]; cm.dentable[k] = gs[k]; old.dispose(); }
+  }
 
   let liveryCache = {};
   function liveryTex(carId, look, own) {
@@ -292,12 +312,10 @@
     const glass = new THREE.MeshStandardMaterial({ color: 0x0c1016, metalness: 0.6, roughness: 0.12, envMap: R.envMap, envMapIntensity: 1.2 });
     const dark = new THREE.MeshStandardMaterial({ color: 0x16171a, metalness: 0.2, roughness: 0.7 });
     const shapeKey = SHAPES[def.shape] ? def.shape : 'coupe';
-    const body = new THREE.Mesh(protoGeo('body:' + shapeKey, () => bodyGeom(S.lower, L, W, H)), paint);
+    const shell = carShell(shapeKey, false);
+    const body = new THREE.Mesh(shell[0], paint);
     body.castShadow = true; grp.add(body);
-    const cab = new THREE.Mesh(protoGeo('cab:' + shapeKey, () => {
-      const g = extrude(S.cabin, W - 0.34, 0.04); g.translate(-L / 2, 0, -(W - 0.34) / 2); g.rotateY(-Math.PI / 2);
-      const t = tessellate(g, 0.3); g.dispose(); t.computeVertexNormals(); return t;
-    }), glass);
+    const cab = new THREE.Mesh(shell[1], glass);
     cab.castShadow = true; grp.add(cab);
     // крыша - полоска цвета кузова поверх стёкол
     const cb = S.cabin, roofPts = [[cb[1][0] + 0.05, cb[1][1] - 0.04], [cb[1][0] + 0.08, cb[1][1] + 0.03], [cb[2][0] - 0.05, cb[2][1] + 0.03], [cb[2][0] - 0.02, cb[2][1] - 0.04]];
@@ -363,7 +381,7 @@
     blob.rotation.x = -Math.PI / 2; blob.position.y = 0.04; blob.renderOrder = 1;
     const root = new THREE.Group(); root.add(grp); root.add(blob);
     return { root, body: grp, paint, rimMat, headMat, tailMat, wheels, blob, S, L, W, carId, look: Object.assign({}, look), mats: [paint, glass, dark, headMat, tailMat, tyreMat, rimMat], ownTex: opts.own ? [liv, rim] : [],
-      parts, lights, dentable: [body.geometry, cab.geometry, roof.geometry], dentSeen: 0, detSeen: 0, repairs: 0 };
+      parts, lights, dentable: [body.geometry, cab.geometry, roof.geometry], shell: [body, cab], shapeKey, fine: false, dentSeen: 0, detSeen: 0, repairs: 0 };
   }
   // Развёртка детали как у кузова: верхние грани - вид сверху, остальные - вид сбоку.
   function partUV(g, L, W, H) {
@@ -390,6 +408,7 @@
     if (cm.repairs !== d.repairs) { restoreCar(cm); cm.repairs = d.repairs; cm.dentSeen = d.dentN; cm.detSeen = d.detachN; }
     if (cm.dentSeen < d.dentN) {
       const DM = window.DriftDamage;
+      fineShell(cm);
       for (let n = Math.max(cm.dentSeen, d.dentN - d.dents.length); n < d.dentN; n++) {
         const dent = d.dents[n % d.dents.length];
         for (const g of cm.dentable) {
