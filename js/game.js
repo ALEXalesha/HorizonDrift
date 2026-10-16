@@ -432,7 +432,7 @@
   function buildVictory() {
     A.music('victory');
     R.showroomView('menu'); R.setShowroomCar(G.career.d.current, G.career.look(G.career.d.current));
-    $('creditsRoll').innerHTML = `<h4>Horizon Drift</h4><p>Аркадные гонки для «Игротеки»</p>
+    $('creditsRoll').innerHTML = `<h4>Horizon Drift</h4><p>Аркадные гонки для «Хаба»</p>
       <h4>Чемпион</h4><p>Это вы! Побед: ${G.career.d.stats.wins}, призовых: ${money(G.career.d.stats.earned)}</p>
       <h4>Трассы</h4><p>${D.TRACKS.map((t) => esc(t.name)).join(' · ')}</p>
       <h4>Машины</h4><p>${D.CARS.map((c) => esc(c.name)).join(' · ')}</p>
