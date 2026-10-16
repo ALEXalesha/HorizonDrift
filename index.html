@@ -90,6 +90,29 @@
     background: linear-gradient(90deg, #ff3c00, #ff8a1f); box-shadow: 0 8px 28px rgba(255, 80, 0, 0.35); }
   .startbtn:hover { filter: brightness(1.1); }
 
+  /* новая трасса */
+  .genCols { gap: 18px; }
+  .genLeft { width: 360px; flex: 0 0 auto; overflow: auto; padding-right: 4px; }
+  .genRight { flex: 1; min-width: 0; overflow: auto; }
+  .genCodeRow { display: flex; gap: 8px; }
+  #genCode { flex: 1; min-width: 0; padding: 9px 12px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font: inherit; font-size: 17px; letter-spacing: 2px; text-transform: uppercase; user-select: text; }
+  #genCode:focus { outline: 2px solid var(--cyan); }
+  #genMake { margin-top: 12px; }
+  #genMake:disabled, #genRandom:disabled { opacity: 0.5; cursor: default; }
+  .genProg { width: 100%; margin-top: 10px; }
+  #genSaved { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); align-content: start; }
+  #genSaved .card { padding: 8px 10px; } #genSaved .card h3 { font-size: 14px; }
+  #genCard { display: none; }
+  #genMap { width: auto; max-width: 100%; height: min(210px, 25vh); aspect-ratio: 2; margin: 8px auto 4px; }
+  #genCard .kv { display: grid; grid-template-columns: max-content 1fr max-content 1fr; gap: 3px 12px; font-size: 13.5px; color: var(--dim); margin-top: 6px; }
+  #genCard .kv b { color: var(--text); font-weight: 600; }
+  #genSetup { display: none; grid-template-columns: 1fr 1fr; gap: 0 18px; margin-top: 4px; }
+  #genSetup .wide { grid-column: 1 / -1; }
+  @media (max-width: 1100px) { #genCard .kv { grid-template-columns: max-content 1fr; } #genSetup { grid-template-columns: 1fr; } }
+  .genBtns { display: flex; gap: 10px; margin-top: 14px; align-items: center; flex-wrap: wrap; }
+  .genBtns .startbtn { margin-top: 0; flex: 1; }
+  @media (max-width: 860px) { .genCols { flex-direction: column; overflow: auto; } .genLeft { width: auto; overflow: visible; } .genRight { overflow: visible; } }
+
   /* гараж */
   #scrGarage .cols { gap: 14px; }
   #gCars { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; padding-bottom: 26px; -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 34px), transparent); mask-image: linear-gradient(180deg, #000 calc(100% - 34px), transparent); }
@@ -304,6 +327,7 @@
     <button class="big" data-go="career">Карьера</button>
     <button data-go="roam">Свободная езда</button>
     <button data-go="quick">Быстрая гонка</button>
+    <button data-go="gen">Новая трасса</button>
     <button data-go="garage">Гараж</button>
     <button data-go="settings">Настройки</button>
     <button data-go="records">Рекорды</button>
@@ -344,6 +368,36 @@
       <div class="lbl">Сложность</div><div class="seg" id="qDiff"></div>
       <p class="note" id="qNote"></p>
       <button class="startbtn" id="qStart">Старт</button>
+    </div>
+  </div>
+</section>
+
+<section id="scrGen" class="screen dark">
+  <div class="head"><button class="back" data-back>← Назад</button><h2>Новая трасса</h2><span class="sp"></span><span class="note">Один код - одна трасса: им можно поделиться</span></div>
+  <div class="cols genCols">
+    <div class="col genLeft">
+      <div class="lbl">Тип</div><div class="seg" id="genType"></div>
+      <div class="lbl">Сложность трассы</div><div class="seg" id="genDiff"></div>
+      <div class="lbl">Длина</div><div class="seg" id="genLen"></div>
+      <div class="lbl">Код или зерно</div>
+      <div class="genCodeRow"><input id="genCode" maxlength="12" spellcheck="false" autocomplete="off" placeholder="R2M-3F9K1Z" aria-label="Код трассы или зерно"><button class="back" id="genRandom">Случайное</button></div>
+      <button class="startbtn" id="genMake">Создать трассу</button>
+      <div class="progress genProg"><i id="genBar"></i></div>
+      <p class="note" id="genStatus">Трассу проверяют бот игры и нейросеть-гонщик: круг должен быть проходим.</p>
+      <div class="lbl">Сохранённые трассы</div>
+      <div class="grid" id="genSaved"></div>
+    </div>
+    <div class="col genRight">
+      <div class="card" id="genCard"><h3 id="genName"></h3><div class="sub" id="genSub"></div>
+        <canvas class="mini" id="genMap" width="520" height="260"></canvas><div class="kv" id="genInfo"></div></div>
+      <div id="genSetup">
+        <div><div class="lbl">Режим</div><div class="seg" id="genMode"></div></div>
+        <div><div class="lbl">Соперники</div><div class="seg" id="genOpp"></div></div>
+        <div><div class="lbl">Круги</div><div class="seg" id="genLaps"></div></div>
+        <div><div class="lbl">Сложность соперников</div><div class="seg" id="genDiffR"></div></div>
+        <div class="wide"><div class="lbl">Машина</div><div class="seg" id="genCar"></div></div>
+        <div class="genBtns wide"><button class="back" id="genSave">Сохранить трассу</button><button class="startbtn" id="genStartBtn">Поехать</button></div>
+      </div>
     </div>
   </div>
 </section>
@@ -464,6 +518,9 @@
 <script src="vendor/three.min.js"></script>
 <script src="js/data.js"></script>
 <script src="js/core.js"></script>
+<script src="js/airacer-models.js"></script>
+<script src="js/airacer.js"></script>
+<script src="js/trackgen.js"></script>
 <script src="js/damage.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/render.js"></script>

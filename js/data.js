@@ -214,13 +214,17 @@
     { id: 'right', name: 'Руль вправо' }, { id: 'handbrake', name: 'Ручник' }, { id: 'nitro', name: 'Нитро' },
     { id: 'shiftUp', name: 'Передача вверх' }, { id: 'shiftDown', name: 'Передача вниз' }, { id: 'camera', name: 'Камера' },
     { id: 'reset', name: 'Вернуться на трассу' }, { id: 'pause', name: 'Пауза (и Esc)' }, { id: 'lookBack', name: 'Взгляд назад' },
-    { id: 'repair', name: 'Ремонт (свободная езда)' },
+    { id: 'repair', name: 'Ремонт (свободная езда)' }, { id: 'festival', name: 'Фестиваль, события, дуэль (свободная езда)' },
   ];
   const DEFAULT_BINDINGS = {
     accel: ['KeyW', 'ArrowUp'], brake: ['KeyS', 'ArrowDown'], left: ['KeyA', 'ArrowLeft'], right: ['KeyD', 'ArrowRight'],
     handbrake: ['Space', ''], nitro: ['ShiftLeft', 'ShiftRight'], shiftUp: ['KeyE', ''], shiftDown: ['KeyQ', ''],
     camera: ['KeyC', ''], reset: ['KeyR', ''], pause: ['KeyP', ''], lookBack: ['KeyV', ''], repair: ['KeyG', ''],
+    // 1.2.0: фестиваль был на E вместе с «передачей вверх» - с ручной коробкой у фестиваля E открывал фестиваль, а не передачу
+    festival: ['KeyT', ''],
   };
+  // Клавиши, которые не переназначаются: в свободной езде на них карта и фото-режим, Esc - всегда пауза и «назад».
+  const RESERVED_KEYS = { KeyM: 'большая карта в свободной езде', KeyF: 'фото-режим в свободной езде', Escape: 'пауза и «назад»' };
 
   const DEFAULT_SETTINGS = {
     musicVol: 0.5, sfxVol: 0.8, engineVol: 0.7, difficulty: 'normal', units: 'kmh',
@@ -228,6 +232,7 @@
     quality: 'high', shadows: true, drawDist: 'far', particles: 'high', showFps: false, camera: 'chase', motionBlur: true,
     gamepad: true, deadzone: 0.15, lookSens: 1, invertY: false,
     damage: 'visual',             // повреждения: 'off' | 'visual' (вмятины и детали, физика прежняя) | 'full'
+    rivalAi: 'neural',            // кто ведёт соперников: 'neural' (нейросеть AiRacer, js/airacer.js) | 'bot' (бот игры по гоночной линии)
   };
   const QUALITY = {
     low: { pixelRatio: 0.75, shadowMap: 0, decor: 0.35, particles: 'low', drawDist: 'near', aa: false },
@@ -239,9 +244,9 @@
   const DIFFICULTY = { easy: { name: 'Легко', pace: -0.07, mistakes: 0.05 }, normal: { name: 'Нормально', pace: 0, mistakes: 0.025 },
     hard: { name: 'Сложно', pace: 0.05, mistakes: 0.008 } };
 
-  const VERSION = '1.1.1';        // версия игры (README, CHANGELOG, «Помощь» → «Об игре»)
+  const VERSION = '1.2.0';        // версия игры (README, CHANGELOG, «Помощь» → «Об игре»)
 
   return { VERSION, CARS, BODY, UPGRADES, UPG_MAX, UPG_PRICE, TIER_MUL, SURF, TRACKS, THEMES, CUPS, EVENT_TYPES, BASE_REWARD, PLACE_SHARE,
-    MEDAL_SHARE, DRIVERS, RIVALS, PAINTS, RIMS, RIM_COLORS, LIVERIES, ACTIONS, DEFAULT_BINDINGS, DEFAULT_SETTINGS, QUALITY,
+    MEDAL_SHARE, DRIVERS, RIVALS, PAINTS, RIMS, RIM_COLORS, LIVERIES, ACTIONS, DEFAULT_BINDINGS, RESERVED_KEYS, DEFAULT_SETTINGS, QUALITY,
     DRAW_DIST, DIFFICULTY };
 });

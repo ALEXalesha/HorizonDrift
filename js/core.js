@@ -168,6 +168,12 @@
     return tr;
   }
 
+  // Забыть трассу из кэша (генератор строит десятки кандидатов - память не должна расти с каждым).
+  function forgetTrack(id) {
+    delete trackCache[id];
+    for (const k in profileCache) if (k.slice(0, id.length + 1) === id + '|') delete profileCache[k];
+  }
+
   function idxAt(tr, s) {
     if (tr.closed) { s = ((s % tr.L) + tr.L) % tr.L; } else s = clamp(s, 0, tr.L);
     const i = Math.min(tr.N - 1, Math.floor(s / tr.step));
@@ -706,7 +712,8 @@
           if (pin.shiftDown) { q.shiftDown = true; pin.shiftDown = false; }
         } else if (c.ai || c.finished) {
           if (!c.ai) { c.ai = newAi({ pace: 0.7, nitro: false }); c.assist = { tc: true, abs: true, steer: false, auto: true, sens: 1 }; }
-          aiControl(this, c, dt);
+          // нейросеть AiRacer (airacer.js) рулит соперником до финиша; на круге после финиша и до старта - бот
+          if (c.ai.brain && !c.finished && racing) c.ai.brain(this, c, dt); else aiControl(this, c, dt);
         }
         if (!racing) {
           // до старта машины стоят, мотор можно погазовать
@@ -745,6 +752,8 @@
         if (this.drift.drifting) p.nitro = Math.min(1, p.nitro + dt * 0.05);
         if (p.hit > 2.5) { const lost = this.drift.crash(); if (lost) this.events.push({ type: 'comboLost' }); }
       }
+      // соперники-нейросети: очки дрифта и нитро из заноса - по тем же правилам, что у игрока (airacer.js)
+      for (const c of this.cars) if (c.ai && c.ai.after) c.ai.after(this, c, dt);
       for (const c of this.cars) if (c.hit > 1.5) this.events.push({ type: 'hit', car: c, v: c.hit });
       this.updatePlaces();
       if (this.mode === 'elim') this.checkElim();
@@ -1101,7 +1110,7 @@
   const SET_RANGE = { musicVol: [0, 1], sfxVol: [0, 1], engineVol: [0, 1], steerSens: [0.5, 1.6], deadzone: [0, 0.4], lookSens: [0.3, 3] };
   const SET_ENUM = { difficulty: () => Object.keys(D.DIFFICULTY), units: () => ['kmh', 'mph'], gearbox: () => ['auto', 'manual'], quality: () => Object.keys(D.QUALITY),
     drawDist: () => Object.keys(D.DRAW_DIST), particles: () => ['low', 'medium', 'high'], camera: () => ['chase', 'far', 'hood', 'cockpit'],
-    damage: () => ['off', 'visual', 'full'] };
+    damage: () => ['off', 'visual', 'full'], rivalAi: () => ['neural', 'bot'] };
   const CODE_RE = /^[A-Za-z0-9]{1,24}$/;
   function mergeSettings(saved) {
     const s = JSON.parse(JSON.stringify(D.DEFAULT_SETTINGS));
@@ -1120,6 +1129,11 @@
         const pair = [0, 1].map((k) => (typeof b[k] === 'string' && (b[k] === '' || CODE_RE.test(b[k])) ? b[k] : null));
         if (pair[0] !== null && pair[1] !== null && (pair[0] || pair[1])) s.bindings[a] = pair;
       }
+      // действие, которого не было в сохранённых настройках (новое в этой версии), не забирает клавишу у сохранённого:
+      // его клавиша по умолчанию пустеет, если игрок уже отдал её другому действию
+      const used = new Set();
+      for (const a in s.bindings) if (Array.isArray(saved.bindings[a])) s.bindings[a].forEach((k) => { if (k) used.add(k); });
+      for (const a in s.bindings) if (!Array.isArray(saved.bindings[a])) s.bindings[a] = s.bindings[a].map((k) => (k && used.has(k) ? '' : k));
     }
     return s;
   }
@@ -1261,7 +1275,7 @@
   }
 
   return { G, DT, STEP, GEARS, NITRO_REARM, clamp, lerp, mulberry32, hashStr, buildTrack, project, pointAt, idxAt, trackClearance, solveAutos, runTurtle,
-    carDef, carStats, upgradeLevels, makeCar, stepCar, accelTime, surfMu, DriftScorer, speedProfile, Race, botTime, timeThresholds, TIME_MEDALS,
+    forgetTrack, carDef, carStats, upgradeLevels, makeCar, stepCar, accelTime, surfMu, DriftScorer, speedProfile, Race, botTime, timeThresholds, TIME_MEDALS,
     carBoxContact, carCircleContact, carCarContact, collideCarPair, resolveStatic, carCorners,
     medalFor, rewardFor, findEvent, newCareer, defaultLook, Career, sanitizeCareer, sanitizeRecords, cleanLook, eventEntries, mergeSettings, rebind, toUnits, fmtTime, MEDAL_RANK };
 });

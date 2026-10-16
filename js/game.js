@@ -8,15 +8,16 @@
     return;
   }
   const D = window.DriftData, C = window.DriftCore, R = window.DriftRender, A = window.DriftAudio, DM = window.DriftDamage;
+  const AI = window.DriftAI, TG = window.DriftTrackGen;          // нейросеть-гонщик AiRacer и генератор трасс
   const $ = (id) => document.getElementById(id);
   const params = new URLSearchParams(location.search);
   const FIXED_SEED = params.has('seed') ? (Number(params.get('seed')) || 1) : 0;
-  const KEY = { settings: 'mix.drift.settings', career: 'mix.drift.career', records: 'mix.drift.records' };
+  const KEY = { settings: 'mix.drift.settings', career: 'mix.drift.career', records: 'mix.drift.records', gen: 'mix.drift.gentracks', genRec: 'mix.drift.genrecords' };
   const load = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } };
   const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* нет хранилища */ } };
   const money = (n) => Math.round(n).toLocaleString('ru-RU') + ' кр';
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const trackDef = (id) => D.TRACKS.find((t) => t.id === id);
+  const trackDef = (id) => (id && typeof id === 'object' ? id : D.TRACKS.find((t) => t.id === id));     // трасса игры или новая (описание целиком)
   const MEDAL_RU = { gold: 'Золото', silver: 'Серебро', bronze: 'Бронза' };
   const plural = (n, one, few, many) => { const a = n % 10, b = n % 100; return a === 1 && b !== 11 ? one : a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many; };
   const lapsText = (n) => n + ' ' + plural(n, 'круг', 'круга', 'кругов');
@@ -28,14 +29,17 @@
     input: { thr: 0, brk: 0, steer: 0, hb: 0, nitro: 0, analog: false, shiftUp: false, shiftDown: false },
     override: null, keys: new Set(), camMode: 'chase', seedN: 0, fps: 0, frameTimes: [], restartSettings: null,
     garageCar: null, gTab: 'stats', sTab: 'sound', quick: { track: 'city', mode: 'race', opp: 3, laps: 2, diff: null, car: null },
+    gen: { type: 'race', difficulty: 2, length: 'M', code: '', result: null, busy: false, mode: 'race', opp: 3, laps: 2, diff: null, car: null, run: 0 },
   };
+  G.genSaved = TG.sanitizeSaved(load(KEY.gen));
+  G.genRec = TG.sanitizeRecords(load(KEY.genRec));
   G.career = new C.Career(load(KEY.career), (d) => save(KEY.career, d));
   G.camMode = G.settings.camera;
   const nextSeed = () => (FIXED_SEED ? FIXED_SEED + G.seedN++ : ((Date.now() ^ (Math.random() * 1e9)) >>> 0));
 
   // ======================= экраны =======================
   const SCREENS = { boot: 'scrBoot', main: 'scrMain', career: 'scrCareer', cup: 'scrCup', quick: 'scrQuick', garage: 'scrGarage', settings: 'scrSettings',
-    records: 'scrRecords', help: 'scrHelp', load: 'scrLoad', race: null, victory: 'scrVictory', roam: 'scrRoam', world: null };
+    records: 'scrRecords', help: 'scrHelp', load: 'scrLoad', race: null, victory: 'scrVictory', roam: 'scrRoam', world: null, gen: 'scrGen' };
   function show(name, noPush) {
     if (!noPush && G.screen !== name && !['boot', 'load', 'race', 'world'].includes(G.screen)) G.stack.push(G.screen);
     G.screen = name;
@@ -43,9 +47,9 @@
     $('hud').classList.toggle('show', name === 'race' || name === 'world');
     $('hud').classList.toggle('world', name === 'world');
     if (name !== 'race') { $('scrPause').classList.remove('show'); }
-    const build = { roam: buildRoam, main: buildMain, career: buildCareer, cup: buildCup, quick: buildQuick, garage: buildGarage, settings: buildSettings, records: buildRecords, help: buildHelp, victory: buildVictory }[name];
+    const build = { roam: buildRoam, main: buildMain, career: buildCareer, cup: buildCup, quick: buildQuick, garage: buildGarage, settings: buildSettings, records: buildRecords, help: buildHelp, victory: buildVictory, gen: buildGen }[name];
     if (build) build();
-    if (['main', 'career', 'cup', 'quick', 'garage', 'settings', 'records', 'help', 'roam'].includes(name) && !G.race && !G.world) A.music('menu');
+    if (['main', 'career', 'cup', 'quick', 'garage', 'settings', 'records', 'help', 'roam', 'gen'].includes(name) && !G.race && !G.world) A.music('menu');
   }
   function back() {
     if (G.screen === 'settings' && G.settingsFromPause) { G.settingsFromPause = false; G.screen = G.world && !G.race ? 'world' : 'race'; for (const k in SCREENS) if (SCREENS[k]) $(SCREENS[k]).classList.remove('show'); $('hud').classList.add('show'); $('scrPause').classList.add('show'); return; }
@@ -139,6 +143,8 @@
     });
   }
 
+  // Соперники - нейросеть AiRacer (настройка «ИИ соперников»): уровень по темпу, который игра дала бы боту.
+  function rivalsAi(entries, mode, difficulty) { if (G.settings.rivalAi === 'neural') AI.neuralize(entries, mode, difficulty || G.settings.difficulty); return entries; }
   function playerAssist() {
     const s = G.settings;
     return { tc: s.tc, abs: s.abs, steer: s.steerAssist, auto: s.gearbox === 'auto', sens: s.steerSens };
@@ -148,6 +154,7 @@
     const carId = G.career.d.current;
     const entries = C.eventEntries(f.evt, f.ci, { difficulty: G.settings.difficulty, car: carId, upg: G.career.d.upg[carId], look: G.career.look(carId), seed: FIXED_SEED });
     entries.forEach((e) => { if (!e.isPlayer) e.look = aiLook(e.name); });
+    rivalsAi(entries, f.evt.type);
     const cfg = { track: f.evt.track, mode: f.evt.type, laps: f.evt.laps || 1, entries, seed: nextSeed(), assist: playerAssist() };
     const meta = { kind: 'career', evtId: id, title: f.evt.name, thresholds: f.evt.type === 'time' ? C.timeThresholds(f.evt) : null, goal: f.evt.goal || null };
     return startRace(cfg, meta);
@@ -176,9 +183,9 @@
     };
     seg($('qMode'), [['race', 'Гонка'], ['drift', 'Дрифт'], ['time', 'На время']], q.mode, (v) => { q.mode = v; });
     seg($('qCar'), G.career.d.owned.map((id) => [id, C.carDef(id).name]), q.car, (v) => { q.car = v; });
-    seg($('qOpp'), [0, 1, 2, 3, 4, 5].map((n) => [n, String(n)]), q.opp, (v) => { q.opp = v; }, () => q.mode !== 'race');
+    seg($('qOpp'), [0, 1, 2, 3, 4, 5].map((n) => [n, String(n)]), q.opp, (v) => { q.opp = v; }, (n) => q.mode === 'time' || (q.mode === 'drift' && n > 3));
     seg($('qLaps'), [1, 2, 3, 4, 5].map((n) => [n, String(n)]), td.closed ? q.laps : 1, (v) => { q.laps = v; }, () => !td.closed);
-    seg($('qDiff'), Object.keys(D.DIFFICULTY).map((k) => [k, D.DIFFICULTY[k].name]), q.diff, (v) => { q.diff = v; }, () => q.mode !== 'race' || q.opp === 0);
+    seg($('qDiff'), Object.keys(D.DIFFICULTY).map((k) => [k, D.DIFFICULTY[k].name]), q.diff, (v) => { q.diff = v; }, () => q.mode === 'time' || q.opp === 0);
     $('qNote').textContent = `${td.name}: ${Math.round(C.buildTrack(td.id).lapLen)} м, покрытие - ${D.SURF[td.surface].name}${td.surfaces ? ' с участками асфальта' : ''}.`;
     R.showroomView('menu'); R.setShowroomCar(q.car, G.career.look(q.car));
   }
@@ -187,20 +194,151 @@
     const q = G.quick, td = trackDef(q.track), rng = C.mulberry32(nextSeed());
     if (!q.car || !G.career.owns(q.car)) q.car = G.career.d.current;
     if (!q.diff) q.diff = G.settings.difficulty;
-    const diff = D.DIFFICULTY[q.diff] || D.DIFFICULTY.normal;
-    const entries = [];
+    const entries = quickRivals(q, rng);
+    entries.push({ name: 'Вы', car: q.car, upg: G.career.d.upg[q.car], look: G.career.look(q.car), isPlayer: true });
+    return startRace({ track: td.id, mode: q.mode, laps: td.closed ? q.laps : 1, entries, seed: nextSeed(), assist: playerAssist() }, { kind: 'quick', title: 'Быстрая гонка' });
+  };
+  // Соперники быстрой гонки и новой трассы: машины класса игрока (±1), темп по сложности, в дрифте - не больше трёх.
+  function quickRivals(q, rng) {
+    const diff = D.DIFFICULTY[q.diff] || D.DIFFICULTY.normal, entries = [];
     const myTier = C.carDef(q.car).tier;
     const pool = D.CARS.filter((c) => Math.abs(c.tier - myTier) <= 1);
     const names = D.DRIVERS.slice();
-    const opp = q.mode === 'race' ? q.opp : 0;
+    const opp = q.mode === 'race' ? q.opp : q.mode === 'drift' ? Math.min(3, q.opp) : 0;
+    // в дрифте соперники - на заднеприводных машинах: передний привод в занос не идёт (у нейросети-дрифтера на «Искре» 0 очков)
+    if (q.mode === 'drift') { const rwd = pool.filter((c) => c.drive !== 'fwd'); if (rwd.length) pool.splice(0, pool.length, ...rwd); }
     for (let k = 0; k < opp; k++) {
       const car = pool[Math.floor(rng() * pool.length)].id, name = names.splice(Math.floor(rng() * names.length), 1)[0];
       entries.push({ name, car, upg: { engine: 1, tyres: 1, susp: 1, weight: 1, nitro: 1 }, look: aiLook(name),
         ai: { pace: C.clamp(0.9 + diff.pace + (k / Math.max(1, opp - 1) - 0.5) * 0.04, 0.6, 1.02), mistakes: diff.mistakes, laneBase: (rng() - 0.5) * 1.6 } });
     }
-    entries.push({ name: 'Вы', car: q.car, upg: G.career.d.upg[q.car], look: G.career.look(q.car), isPlayer: true });
-    return startRace({ track: td.id, mode: q.mode, laps: td.closed ? q.laps : 1, entries, seed: nextSeed(), assist: playerAssist() }, { kind: 'quick', title: 'Быстрая гонка' });
-  };
+    return rivalsAi(entries, q.mode, q.diff);
+  }
+
+  // ======================= новая трасса =======================
+  // Генератор (trackgen.js) идёт по шагам: между кусками проверки страница рисует полосу и отвечает на клики.
+  const randomSeed = () => (FIXED_SEED ? (FIXED_SEED * 2654435761 + G.seedN++ * 40503) >>> 0 : ((Date.now() ^ (Math.random() * 4294967296)) >>> 0)) % 2176782336;
+  function genParams() { const g = G.gen; return { type: g.type, difficulty: g.difficulty, length: g.length, seed: g.seed >>> 0 }; }
+  function genCodeFromInput() {
+    const g = G.gen, txt = String($('genCode').value || '').trim().toUpperCase();
+    const p = TG.decode(txt);
+    if (p) { g.type = p.type; g.difficulty = p.difficulty; g.length = p.length; g.seed = p.seed; return true; }
+    if (/^[0-9A-Z]{1,7}$/.test(txt) && parseInt(txt, 36) <= 0xffffffff) { g.seed = parseInt(txt, 36) >>> 0; return true; }
+    return !txt ? false : null;                   // null - непонятный код
+  }
+  function buildGen() {
+    const g = G.gen;
+    if (!g.car || !G.career.owns(g.car)) g.car = G.career.d.current;
+    if (!g.diff) g.diff = G.settings.difficulty;
+    if (g.seed == null) g.seed = randomSeed();
+    const seg = (el, items, cur, fn, dis) => {
+      el.innerHTML = '';
+      for (const it of items) {
+        const b = document.createElement('button'); b.textContent = it[1]; b.className = it[0] === cur ? 'on' : ''; b.disabled = !!(dis && dis(it[0])) || (g.busy && el.dataset.lock === '1');
+        b.dataset.v = String(it[0]);
+        b.onclick = () => { fn(it[0]); A.play('click'); buildGen(); };
+        el.appendChild(b);
+      }
+    };
+    $('genType').dataset.lock = $('genDiff').dataset.lock = $('genLen').dataset.lock = '1';
+    seg($('genType'), Object.keys(TG.TYPE_NAMES).map((k) => [k, TG.TYPE_NAMES[k]]), g.type, (v) => { g.type = v; });
+    seg($('genDiff'), [[1, 'Лёгкая'], [2, 'Средняя'], [3, 'Трудная']], g.difficulty, (v) => { g.difficulty = v; });
+    seg($('genLen'), Object.keys(TG.LENGTH_NAMES).map((k) => [k, TG.LENGTH_NAMES[k]]), g.length, (v) => { g.length = v; });
+    if (document.activeElement !== $('genCode')) $('genCode').value = TG.encode(genParams());
+    $('genMake').disabled = g.busy; $('genRandom').disabled = g.busy;
+    const r = g.result;
+    $('genCard').style.display = r ? 'block' : 'none';
+    $('genSetup').style.display = r ? 'grid' : 'none';
+    if (r) {
+      const def = r.def, tr = C.buildTrack(def), rec = G.genRec[r.code] || {};
+      $('genName').textContent = def.name;
+      $('genSub').textContent = `Код ${r.code} · ${TG.TYPE_NAMES[def.gen.type]} · ${['', 'лёгкая', 'средняя', 'трудная'][def.gen.difficulty]} · ${D.SURF[def.surface].name}`;
+      drawMini($('genMap'), def);
+      const corners = def.cmds.filter((c) => c[0] !== 'S').length;
+      const ch = r.check;
+      let check = 'проверена при создании';
+      if (ch) check = (ch.by === 'bot' ? `бот игры: круг ${C.fmtTime(ch.time)}` : 'бот игры застревал в тесных связках') + (ch.ai ? ` · нейросеть: круг ${C.fmtTime(ch.ai.time)}, без сбросов` : '');
+      $('genInfo').innerHTML = `<span>Длина круга</span><b>${Math.round(tr.lapLen)} м</b><span>Поворотов</span><b>${corners}</b>
+        <span>Интересность</span><b>${Math.round((def.gen.interest || 0) * 100)}%</b><span>Проверка</span><b>${esc(check)}</b>
+        <span>Рекорды кода</span><b>${rec.lap ? 'круг ' + C.fmtTime(rec.lap) : 'круга нет'}${rec.time ? ' · заезд ' + C.fmtTime(rec.time) : ''}${rec.drift ? ' · дрифт ' + rec.drift.toLocaleString('ru-RU') : ''}</b>`;
+      seg($('genMode'), [['race', 'Гонка'], ['drift', 'Дрифт'], ['time', 'На время']], g.mode, (v) => { g.mode = v; });
+      seg($('genCar'), G.career.d.owned.map((id) => [id, C.carDef(id).name]), g.car, (v) => { g.car = v; });
+      seg($('genOpp'), [0, 1, 2, 3, 4, 5].map((n) => [n, String(n)]), g.mode === 'time' ? 0 : g.mode === 'drift' ? Math.min(3, g.opp) : g.opp, (v) => { g.opp = v; }, (n) => g.mode === 'time' || (g.mode === 'drift' && n > 3));
+      seg($('genLaps'), [1, 2, 3, 4, 5].map((n) => [n, String(n)]), g.laps, (v) => { g.laps = v; });
+      seg($('genDiffR'), Object.keys(D.DIFFICULTY).map((k) => [k, D.DIFFICULTY[k].name]), g.diff, (v) => { g.diff = v; }, () => g.mode === 'time' || g.opp === 0);
+      const saved = G.genSaved.some((s) => s.code === r.code);
+      $('genSave').textContent = saved ? 'Убрать из сохранённых' : 'Сохранить трассу';
+    }
+    const list = $('genSaved'); list.innerHTML = '';
+    if (!G.genSaved.length) list.innerHTML = '<p class="note">Пока пусто: создайте трассу и нажмите «Сохранить трассу».</p>';
+    for (const s of G.genSaved) {
+      const rec = G.genRec[s.code] || {}, b = document.createElement('button');
+      b.className = 'card' + (r && r.code === s.code ? ' sel' : ''); b.dataset.code = s.code;
+      b.innerHTML = `<h3>${esc(s.def.name)}</h3><div class="sub">${s.code}${rec.lap ? ' · круг ' + C.fmtTime(rec.lap) : ''}${rec.drift ? ' · дрифт ' + rec.drift.toLocaleString('ru-RU') : ''}</div><canvas class="mini" width="200" height="70" style="height:70px"></canvas>`;
+      b.onclick = () => { if (g.busy) return; const p = TG.decode(s.code); Object.assign(g, { type: p.type, difficulty: p.difficulty, length: p.length, seed: p.seed }); g.result = { code: s.code, def: s.def, check: null }; A.play('click'); $('genStatus').textContent = 'Сохранённая трасса ' + s.code; buildGen(); };
+      list.appendChild(b); drawMini(b.querySelector('canvas'), s.def);
+    }
+    R.showroomView('menu'); R.setShowroomCar(g.car, G.career.look(g.car));
+  }
+  async function genMake(o) {
+    const g = G.gen;
+    if (g.busy) return null;
+    if (o) { Object.assign(g, o); if (o.code) { const p = TG.decode(o.code); if (p) Object.assign(g, { type: p.type, difficulty: p.difficulty, length: p.length, seed: p.seed }); } }
+    else if (genCodeFromInput() === null) { toast('Код вида R2M-3F9K1Z или зерно из букв и цифр'); return null; }
+    const params = genParams(), code = TG.encode(params), run = ++g.run;
+    g.busy = true; $('genBar').style.width = '0%'; $('genStatus').textContent = 'Строим трассу ' + code + '…'; buildGen();
+    const t0 = performance.now();
+    let res = null, n = 0;
+    try {
+      const it = TG.generateIter(params, { candidates: 2 });
+      let slice = performance.now();
+      for (;;) {
+        const st = it.next();
+        if (st.done) { res = st.value; break; }
+        n++;
+        if (st.value) $('genStatus').textContent = `Строим трассу ${code}: проверено вариантов ${st.value.sub + 1}, проходимых ${st.value.done} из ${st.value.total}…`;
+        if (performance.now() - slice > 30) {    // отдать кадр странице: полоса, клики, рисование меню
+          $('genBar').style.width = Math.round(100 * (1 - Math.exp(-n / 60))) + '%';
+          await new Promise((r) => setTimeout(r, 0));
+          slice = performance.now();
+          if (run !== g.run) return null;
+        }
+      }
+    } finally { g.busy = false; }
+    $('genBar').style.width = '100%';
+    if (!res) { $('genStatus').textContent = `Для кода ${code} проходимой трассы не нашлось - попробуйте другое зерно`; buildGen(); return null; }
+    const old = g.result; if (old && old.def.id !== res.def.id && !G.genSaved.some((s) => s.def.id === old.def.id)) C.forgetTrack(old.def.id);
+    g.result = { code: res.code, def: res.def, check: res.check };
+    $('genStatus').textContent = `Готово за ${((performance.now() - t0) / 1000).toFixed(1)} с: проверено вариантов ${res.tried.length}`;
+    if (G.screen === 'gen') buildGen();
+    return g.result;
+  }
+  function genSave() {
+    const r = G.gen.result; if (!r) return false;
+    const i = G.genSaved.findIndex((s) => s.code === r.code);
+    if (i >= 0) { G.genSaved.splice(i, 1); toast('Трасса убрана из сохранённых'); }
+    else { G.genSaved.unshift({ code: r.code, def: r.def, savedAt: Date.now() }); G.genSaved.length = Math.min(60, G.genSaved.length); toast('Трасса сохранена: ' + r.code); }
+    save(KEY.gen, G.genSaved);
+    if (G.screen === 'gen') buildGen();
+    return i < 0;
+  }
+  function genStart(o) {
+    const g = G.gen; if (o) Object.assign(g, o);
+    const r = g.result; if (!r || g.busy) return null;
+    A.init();
+    if (!g.car || !G.career.owns(g.car)) g.car = G.career.d.current;
+    if (!g.diff) g.diff = G.settings.difficulty;
+    const rng = C.mulberry32(nextSeed());
+    const entries = quickRivals({ mode: g.mode, opp: g.opp, diff: g.diff, car: g.car }, rng);
+    entries.push({ name: 'Вы', car: g.car, upg: G.career.d.upg[g.car], look: G.career.look(g.car), isPlayer: true });
+    return startRace({ track: r.def, mode: g.mode, laps: g.laps, entries, seed: nextSeed(), assist: playerAssist() }, { kind: 'gen', title: r.def.name });
+  }
+  $('genMake').onclick = () => { A.init(); genMake(); };
+  $('genRandom').onclick = () => { A.init(); G.gen.seed = randomSeed(); $('genCode').value = TG.encode(genParams()); genMake(); };
+  $('genCode').addEventListener('keydown', (e) => { if (e.code === 'Enter') { e.preventDefault(); genMake(); } e.stopPropagation(); });
+  $('genCode').addEventListener('change', () => { if (genCodeFromInput()) buildGen(); });
+  $('genStartBtn').onclick = () => genStart();
+  $('genSave').onclick = () => { A.play('click'); genSave(); };
 
   // ======================= гараж =======================
   const STAT_MAX = { top: 380, acc: 3, grip: 1.6, mass: 1700, drift: 60, nitro: 6 };
@@ -325,7 +463,7 @@
   };
   const bindName = (a) => keyName(G.settings.bindings[a][0] || G.settings.bindings[a][1]);
   // клавиши свободной езды, которые не переназначаются: действие на них в мире не сработало бы (карта и фото раньше)
-  const WORLD_KEYS = { KeyM: 'большая карта в свободной езде', KeyF: 'фото-режим в свободной езде' };
+  const WORLD_KEYS = D.RESERVED_KEYS;
   function buildSettings() {
     const s = G.settings, body = $('sBody'), kb = (a) => keyName(s.bindings[a][0] || s.bindings[a][1]);
     document.querySelectorAll('#sTabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === G.sTab));
@@ -339,6 +477,8 @@
       h = row('Музыка', range('musicVol', 0, 1, 0.05)) + row('Эффекты', range('sfxVol', 0, 1, 0.05), 'удары, шины, сигналы') + row('Мотор', range('engineVol', 0, 1, 0.05));
     } else if (G.sTab === 'game') {
       h = row('Сложность соперников', seg('difficulty', Object.keys(D.DIFFICULTY).map((k) => [k, D.DIFFICULTY[k].name])), 'темп и число ошибок ИИ')
+        + row('ИИ соперников', seg('rivalAi', [['neural', 'Нейросеть'], ['bot', 'Бот игры']]),
+          'нейросеть AiRacer видит только то, что видел бы водитель (дорогу впереди, стены и машины рядом), и жмёт те же газ, тормоз, руль, ручник и нитро; бот игры едет по готовой гоночной линии. Со следующего заезда')
         + row('Скорость', seg('units', [['kmh', 'км/ч'], ['mph', 'mph']]))
         + row('Камера по умолчанию', seg('camera', [['chase', 'Сзади'], ['far', 'Дальняя'], ['hood', 'С капота'], ['cockpit', 'Из салона']]), 'в гонке - клавиша ' + kb('camera'))
         + row('Чувствительность взгляда', range('lookSens', 0.3, 3, 0.1), 'правая кнопка мыши - осмотреться, колесо - дальше/ближе, ' + kb('lookBack') + ' - назад')
@@ -404,12 +544,22 @@
     h += `<tr><td>Заездов</td><td>${st.races}</td></tr><tr><td>Побед</td><td>${st.wins}</td></tr><tr><td>Медали</td><td>${medalHtml('gold')} ${medals.gold} &nbsp; ${medalHtml('silver')} ${medals.silver} &nbsp; ${medalHtml('bronze')} ${medals.bronze}</td></tr>`;
     h += `<tr><td>Заработано</td><td>${money(st.earned)}</td></tr><tr><td>Потрачено</td><td>${money(st.spent)}</td></tr><tr><td>Лучшая серия дрифта</td><td>${(st.driftBest || 0).toLocaleString('ru-RU')}</td></tr>`;
     h += `<tr><td>Машин в гараже</td><td>${G.career.d.owned.length} из ${D.CARS.length}</td></tr><tr><td>Чемпион</td><td>${G.career.d.victory ? 'да' : 'пока нет'}</td></tr></table>`;
+    const codes = Object.keys(G.genRec);
+    if (codes.length) {
+      h += '<h3 style="margin:22px 0 8px;letter-spacing:2px">НОВЫЕ ТРАССЫ</h3><table id="recGen"><tr><th>Код</th><th>Трасса</th><th>Лучший круг</th><th>Лучший заезд на время</th><th>Лучший дрифт</th></tr>';
+      for (const code of codes) {
+        const r = G.genRec[code], s = G.genSaved.find((x) => x.code === code);
+        h += `<tr><td>${code}</td><td>${s ? esc(s.def.name) : '—'}</td><td>${r.lap ? C.fmtTime(r.lap) : '—'}</td><td>${r.time ? C.fmtTime(r.time) : '—'}</td><td>${r.drift ? r.drift.toLocaleString('ru-RU') : '—'}</td></tr>`;
+      }
+      h += '</table>';
+    }
     $('recBody').innerHTML = h;
   }
   function buildHelp() {
     const b = G.settings.bindings, k = (a) => b[a].filter(Boolean).map((c) => `<kbd>${esc(keyName(c))}</kbd>`).join(' ');
     $('helpBody').innerHTML = `
       <h3>Управление</h3><ul>
+      <li>${k('festival')} фестиваль, события и дуэли в свободной езде</li>
       <li>${k('accel')} газ, ${k('brake')} тормоз и задний ход</li><li>${k('left')} ${k('right')} руль</li>
       <li>${k('handbrake')} ручник - сорвать заднюю ось в занос</li><li>${k('nitro')} нитро (копится в заносе)</li>
       <li>${k('camera')} камера: сзади, дальняя, с капота, из салона</li><li>${k('reset')} вернуться на трассу</li>
@@ -419,7 +569,10 @@
       <li><b>На время</b> - один на трассе, медаль по времени.</li><li><b>Дуэль</b> - один на один с чемпионом кубка.</li><li><b>На вылет</b> - после каждого круга последний выбывает.</li></ul>
       <h3>Трасса</h3><ul><li>Голубая арка - следующий чекпоинт. Круг засчитывается, только если взяты все чекпоинты: срезать нельзя.</li>
       <li>Покрытие меняет сцепление: асфальт держит лучше всего, гравий хуже, снег хуже всего. Полноприводный «Буран» на гравии и снегу сильнее всех.</li>
-      <li>Красная стрелка «Не туда» - вы едете против хода. ${k('reset')} вернёт на трассу.</li></ul>
+      <li>Красная стрелка «Не туда» - вы едете против хода. ${k('reset')} вернёт на трассу.</li>
+      <li>«Новая трасса» в меню: трасса по коду (тип, сложность, длина, зерно). Тот же код - та же трасса, им можно поделиться. Бот игры и нейросеть проверяют, что круг проходим.</li></ul>
+      <h3>Соперники</h3><ul><li>По умолчанию соперников ведёт нейросеть AiRacer: она видит только то, что видел бы водитель, и управляет тем же газом, тормозом и рулём. Повреждения и нитро у неё по тем же правилам.</li>
+      <li>«Настройки» → «Игра» → «ИИ соперников»: можно вернуть бота игры. Сложность меняет осторожность нейросети в поворотах.</li></ul>
       <h3>Повреждения</h3><ul><li>«Настройки» → «Игра» → «Повреждения»: <b>выкл</b>, <b>только вид</b> (по умолчанию) или <b>полные</b>.</li>
       <li>Сильный удар мнёт кузов в месте удара, слабое касание следа не оставляет. Зеркала, бамперы и капот отлетают и лежат на дороге 12 секунд.</li>
       <li>«Полные»: шины стираются от торможения юзом, заносов и пробуксовки и держат хуже (до 30%); удар в переднее колесо уводит руль, смятый перед отнимает мощность. Справа внизу, рядом с нитро, - схема кузова и шин.</li>
@@ -485,6 +638,7 @@
     let race;
     try {
       race = new C.Race(cfg);
+      AI.attachRace(race);                       // соперники-нейросети и дрифт соперников (по записям cfg.entries)
       // повреждения: в карьере и на время - не больше «только вид» (медали и рекорды - по одним правилам с эталонным ботом)
       race.damageMode = DM.modeFor(G.settings.damage, meta.kind, cfg.mode);
       for (const c of race.cars) DM.attach(c, race.damageMode);
@@ -540,7 +694,7 @@
     stopRace();
     if (vict) { if (G.world) quitWorld(true); G.stack = ['main']; show('victory', true); return; }
     if (G.fromWorld && G.world) { G.fromWorld = false; resumeWorld(); return; }
-    if (m && m.kind === 'career') { G.stack = ['main', 'career']; show('cup', true); } else { G.stack = ['main']; show('quick', true); }
+    if (m && m.kind === 'career') { G.stack = ['main', 'career']; show('cup', true); } else if (m && m.kind === 'gen') { G.stack = ['main']; show('gen', true); } else { G.stack = ['main']; show('quick', true); }
   };
 
   // ======================= HUD =======================
@@ -573,7 +727,7 @@
   }
   function updateKeysHint() {
     const b = G.settings.bindings, k = (a) => keyName(b[a][0] || b[a][1]);
-    $('hKeys').textContent = `${k('accel')}/${k('brake')} газ-тормоз · ${k('left')}/${k('right')} руль · ${k('handbrake')} ручник · ${k('nitro')} нитро · ${k('camera')} камера · ${k('reset')} на трассу · Esc пауза`;
+    $('hKeys').textContent = `${k('accel')}/${k('brake')} газ-тормоз · ${k('left')}/${k('right')} руль · ${k('handbrake')} ручник · ${k('nitro')} нитро · ${k('camera')} камера · ${k('reset')} на ${G.world && G.screen === 'world' ? 'дорогу · ' + k('festival') + ' фестиваль' : 'трассу'} · Esc пауза`;
   }
   let msgT = 0;
   function showMsg(big, small, ms) {
@@ -630,7 +784,12 @@
     const dr = race.drift, showDrift = dr.active && dr.pending > 0;
     $('hDrift').style.display = showDrift ? 'block' : 'none';
     if (showDrift) { setText('hDriftPts', '+' + dr.pending.toLocaleString('ru-RU')); setText('hDriftMul', '×' + dr.mult); $('hDriftGrace').style.width = Math.round((1 - dr.grace / 1.2) * 100) + '%'; }
-    if (race.cars.length > 1) {
+    if (race.cars.length > 1 && mode === 'drift') {
+      // дрифт с соперниками: очки у всех по одним правилам, таблица - по очкам
+      let h = '';
+      driftRows(race).forEach((r, i) => { h += `<div class="${r.car === pl ? 'me' : ''}"><span>${i + 1}. ${esc(r.car.name)}</span><span>${r.pts.toLocaleString('ru-RU')}</span></div>`; });
+      setHtml('hBoard', h);
+    } else if (race.cars.length > 1) {
       let h = '';
       const ref = pl.dist;
       race.order.forEach((c, i) => {
@@ -649,6 +808,10 @@
     else if (race.t < 0.8) { cd.style.display = 'block'; setText('hCount', 'СТАРТ!'); } else cd.style.display = 'none';
     drawSpeedo(pl); drawMap(race);
     if (G.settings.showFps) setText('hFps', G.fps + ' FPS');
+  }
+  // очки дрифта всех машин заезда (игрок - очки заезда, соперники - airacer.js), по убыванию
+  function driftRows(race) {
+    return race.cars.map((c) => ({ car: c, pts: c === race.player ? race.drift.total + (race.phase === 'done' ? 0 : race.drift.pending) : AI.driftPoints(c) })).sort((a, b) => b.pts - a.pts);
   }
   // повреждения на HUD (только «полные»): зоны кузова и шины - цветом от зелёного к красному
   const dmgCol = (v) => `hsl(${Math.round(120 * (1 - C.clamp(v, 0, 1)))},80%,${v > 0.02 ? 50 : 42}%)`;
@@ -706,6 +869,15 @@
     race.events.length = 0;
   }
   function saveRecords(res) {
+    const gen = G.race && G.race.track.def.gen;
+    if (gen) {                                  // новая трасса: рекорды по коду (тип, сложность, длина, зерно)
+      const r = G.genRec[gen.code] || (G.genRec[gen.code] = {});
+      if (res.bestLap && (!r.lap || res.bestLap < r.lap)) r.lap = Math.round(res.bestLap * 1000) / 1000;
+      if (res.mode === 'time' && res.time && (!r.time || res.time < r.time)) r.time = Math.round(res.time * 1000) / 1000;
+      if (res.drift && (!r.drift || res.drift > r.drift)) r.drift = res.drift;
+      save(KEY.genRec, G.genRec);
+      return;
+    }
     let r = G.records.tracks[res.track];
     if (!r || typeof r !== 'object') r = G.records.tracks[res.track] = {};
     if (res.bestLap && (!r.lap || res.bestLap < r.lap)) r.lap = Math.round(res.bestLap * 1000) / 1000;
@@ -718,6 +890,11 @@
     res.thresholds = m.thresholds || null;
     try { saveRecords(res); } catch (e) { G.records = { tracks: {} }; }        // испорченные рекорды не должны отнять итоги и награду
     G.lastApply = m.kind === 'career' ? G.career.applyResult(m.evtId, res) : null;
+    if (res.mode === 'drift' && G.race.cars.length > 1) {
+      const rows = driftRows(G.race);
+      res.driftTable = rows.map((r, i) => ({ place: i + 1, name: r.car.name, carId: r.car.carId, isPlayer: r.car.isPlayer, pts: r.pts }));
+      res.driftPlace = res.driftTable.find((r) => r.isPlayer).place;
+    }
     if (m.kind === 'worldDuel') {
       // призовые за дуэль с бродячим соперником - один раз в игровые сутки на соперника
       const sv = G.world ? G.world.save : null, day = sv ? sv.day || 0 : 0;
@@ -739,7 +916,7 @@
     const mEl = $('resMedal');
     if (m.kind === 'career') { mEl.style.display = 'grid'; mEl.className = 'bigmedal medal ' + (medal || 'none'); mEl.textContent = medal ? MEDAL_RU[medal] : 'без медали'; } else mEl.style.display = 'none';
     let txt = '';
-    if (res.mode === 'drift') txt = `Очки дрифта: <b>${res.drift.toLocaleString('ru-RU')}</b>${m.goal ? `<br><span class="note">Цели: ${m.goal.map((v) => v.toLocaleString('ru-RU')).join(' / ')}</span>` : ''}<br>Лучшая серия: ${res.driftBest.toLocaleString('ru-RU')}`;
+    if (res.mode === 'drift') txt = `Очки дрифта: <b>${res.drift.toLocaleString('ru-RU')}</b>${res.driftTable ? ` · место <b>${res.driftPlace}</b> из ${res.driftTable.length}` : ''}${m.goal ? `<br><span class="note">Цели: ${m.goal.map((v) => v.toLocaleString('ru-RU')).join(' / ')}</span>` : ''}<br>Лучшая серия: ${res.driftBest.toLocaleString('ru-RU')}`;
     else if (res.mode === 'time') txt = `Время: <b>${C.fmtTime(res.time)}</b>${m.thresholds ? `<br><span class="note">Золото / серебро / бронза: ${m.thresholds.map(C.fmtTime).join(' / ')}</span>` : ''}`;
     else txt = `Место: <b>${res.place}</b> из ${res.table.length}${res.time ? '<br>Время: ' + C.fmtTime(res.time) : ''}`;
     if (res.bestLap && res.mode !== 'time' && G.race && G.race.track.closed) txt += `<br>Лучший круг: ${C.fmtTime(res.bestLap)}`;
@@ -752,7 +929,11 @@
     if (ap && ap.duel) ban += ap.win ? '<div class="banner">Дуэль выиграна!</div>' : '<div class="banner" style="background:rgba(255,74,90,0.15);color:#ffc6cb">Дуэль проиграна - соперник ещё встретится в мире</div>';
     if (m.kind === 'career' && !medal) ban += '<div class="banner" style="background:rgba(255,74,90,0.15);color:#ffc6cb">Медали нет - попробуйте ещё раз или улучшите машину в гараже</div>';
     $('resBanners').innerHTML = ban;
-    if (res.table.length > 1) {
+    if (res.driftTable) {
+      let h = '<table><tr><th>#</th><th>Гонщик</th><th>Машина</th><th>Очки дрифта</th></tr>';
+      for (const r of res.driftTable) h += `<tr class="${r.isPlayer ? 'me' : ''}"><td>${r.place}</td><td>${esc(r.name)}</td><td>${esc(C.carDef(r.carId).name)}</td><td>${r.pts.toLocaleString('ru-RU')}</td></tr>`;
+      $('resTable').innerHTML = h + '</table>';
+    } else if (res.table.length > 1) {
       const lead = res.table[0].time;
       let h = '<table><tr><th>#</th><th>Гонщик</th><th>Машина</th><th>Время</th><th>Лучший круг</th></tr>';
       for (const r of res.table) {
@@ -784,7 +965,7 @@
     if ($('modal').classList.contains('show')) { if (e.code === 'Escape') $('modal').classList.remove('show'); return; }
     if (G.screen === 'world' && G.world) {
       const act = actionFor(e.code);
-      if (act || ['Escape', 'KeyM', 'KeyF', 'KeyE', 'Enter'].includes(e.code)) e.preventDefault();
+      if (act || ['Escape', 'KeyM', 'KeyF', 'Enter'].includes(e.code)) e.preventDefault();
       if (worldKey(e, act)) return;
       if (e.code === 'Escape' || act === 'pause') { if (!e.repeat) setPaused(!G.paused); return; }
       if (G.paused) return;
@@ -838,6 +1019,7 @@
           if (edge(5)) inp.shiftUp = true; if (edge(4)) inp.shiftDown = true;
           if (edge(8) && G.race && G.race.player && G.race.phase === 'race') G.race.resetCar(G.race.player);
           if (edge(8) && G.world && !G.race) G.world.resetPlayer();
+          if (edge(1) && G.world && !G.race && G.screen === 'world') worldInteract();
         }
       }
       padPrev = p.buttons.map((b) => (b.value || (b.pressed ? 1 : 0)) > 0.5);
@@ -1033,7 +1215,7 @@
       const def = WD.MAPS.find((m) => m.id === mapId) || WD.MAPS[0];
       carId = G.career.owns(carId) ? carId : G.career.d.current;
       $('loadName').textContent = def.name; $('loadPlace').textContent = 'Свободная езда · ' + C.carDef(carId).name;
-      $('loadTip').textContent = `M - большая карта с быстрым перемещением, E - события и дуэли, F - фото-режим, ${bindName('reset')} - вернуться на дорогу.`;
+      $('loadTip').textContent = `M - большая карта с быстрым перемещением, ${bindName('festival')} - фестиваль, события и дуэли, F - фото-режим, ${bindName('reset')} - вернуться на дорогу.`;
       const lm = $('loadMap'), lg = lm.getContext('2d'); lg.clearRect(0, 0, lm.width, lm.height); lg.drawImage(mapImage(def.id).canvas, (lm.width - lm.height) / 2, 0, lm.height, lm.height);
       $('loadBar').style.width = '30%'; show('load');
       await new Promise((r) => setTimeout(r, 0));
@@ -1142,8 +1324,9 @@
     if (w.zone) { setText('hDriftPts', (showDrift ? '+' + dr.pending.toLocaleString('ru-RU') : (dr.total || 0).toLocaleString('ru-RU'))); setText('hDriftMul', '×' + dr.mult); $('hDriftGrace').style.width = Math.round((1 - dr.grace / 1.2) * 100) + '%'; }
     const b = G.settings.bindings;
     let prompt = '';
-    if (w.nearHub) prompt = `<kbd>E</kbd> ${w.nearHub.type === 'fest' ? 'Фестиваль: машина, погода, время' : 'События: ' + esc(w.nearHub.name)}`;
-    else if (w.nearRival) prompt = `<kbd>E</kbd> ${esc(w.nearRival.name)} вызывает на дуэль`;
+    const fk = `<kbd>${esc(bindName('festival'))}</kbd>`;          // назначенная клавиша, а не буква по умолчанию
+    if (w.nearHub) prompt = `${fk} ${w.nearHub.type === 'fest' ? 'Фестиваль: машина, погода, время' : 'События: ' + esc(w.nearHub.name)}`;
+    else if (w.nearRival) prompt = `${fk} ${esc(w.nearRival.name)} вызывает на дуэль`;
     const pr = $('wPrompt'); if (hudCache.wPrompt !== prompt) { hudCache.wPrompt = prompt; pr.innerHTML = prompt; pr.style.display = prompt ? 'block' : 'none'; }
     drawSpeedo(p); drawWorldMinimap();
     if (G.settings.showFps) setText('hFps', G.fps + ' FPS');
@@ -1267,8 +1450,8 @@
     const w = G.world, reg = w.M.R.filter((r) => r.track).sort((x, y) => Math.hypot(x.x - w.player.x, x.z - w.player.z) - Math.hypot(y.x - w.player.x, y.z - w.player.z))[0];
     const track = reg ? reg.track : 'city', carId = w.player.carId;
     a.cool = 90;
-    const entries = [{ name: a.name, car: a.car.carId, upg: { engine: 2, tyres: 2, susp: 2 }, look: aiLook(a.name), rival: true, ai: { pace: 0.9 + (D.DIFFICULTY[G.settings.difficulty] || D.DIFFICULTY.normal).pace, mistakes: 0.015 } },
-      { name: 'Вы', car: carId, upg: G.career.d.upg[carId], look: G.career.look(carId), isPlayer: true }];
+    const entries = rivalsAi([{ name: a.name, car: a.car.carId, upg: { engine: 2, tyres: 2, susp: 2 }, look: aiLook(a.name), rival: true, ai: { pace: 0.9 + (D.DIFFICULTY[G.settings.difficulty] || D.DIFFICULTY.normal).pace, mistakes: 0.015 } },
+      { name: 'Вы', car: carId, upg: G.career.d.upg[carId], look: G.career.look(carId), isPlayer: true }], 'duel');
     return startFromWorld(() => startRace({ track, mode: 'duel', laps: trackDef(track).closed ? 1 : 1, entries, seed: nextSeed(), assist: playerAssist() }, { kind: 'worldDuel', title: 'Дуэль: ' + a.name, reward: 1500, rival: a.name }));
   }
 
@@ -1350,6 +1533,14 @@
     }, { passive: true });
   })();
 
+  // Фестиваль, событийная точка или дуэль рядом (клавиша «Фестиваль», на геймпаде - B)
+  function worldInteract() {
+    const w = G.world;
+    if (!w || G.paused || G.overlay) return false;
+    if (w.nearHub) { openHub(w.nearHub); return true; }
+    if (w.nearRival) { startWorldDuel(w.nearRival); return true; }
+    return false;
+  }
   function worldKey(e, act) {
     const w = G.world;
     if (G.overlay === 'photo') { if (e.code === 'Enter') photoSave(); if (e.code === 'KeyF' || e.code === 'Escape') photoToggle(false); e.preventDefault(); return true; }
@@ -1358,10 +1549,7 @@
     if (G.paused) return false;
     if (e.code === 'KeyM') { openMap(); e.preventDefault(); return true; }
     if (e.code === 'KeyF') { photoToggle(true); e.preventDefault(); return true; }
-    if (e.code === 'KeyE' && !e.repeat) {
-      if (w.nearHub) { openHub(w.nearHub); return true; }
-      if (w.nearRival) { startWorldDuel(w.nearRival); return true; }
-    }
+    if (act === 'festival' && !e.repeat && worldInteract()) return true;
     if (act === 'reset' && !e.repeat) { w.resetPlayer(); WR.cam.init = false; return true; }
     if (act === 'repair' && !e.repeat) { if (!w.repairPlayer()) showMsg('Повреждения выключены', 'включаются в «Настройках» → «Игра»', 1300); return true; }
     return false;
@@ -1400,6 +1588,8 @@
     stepWorld(n, input) { if (G.world && !G.paused) stepWorld(n || 1, input ? Object.assign({ thr: 0, brk: 0, steer: 0, hb: 0, nitro: 0, analog: false }, input) : undefined); return G.world; },
     openMap, worldTravel: (id) => worldTravel(id), openHub: (pt) => openHub(pt), get overlay() { return G.overlay; }, photo: (on) => photoToggle(on),
     reloadCareer() { G.career = new C.Career(load(KEY.career), (d) => save(KEY.career, d)); },
+    ai: AI, trackgen: TG, get gen() { return G.gen; }, get genSaved() { return G.genSaved; }, get genRec() { return G.genRec; },
+    generate: (o) => genMake(o), startGen: (o) => genStart(o), saveGen: () => genSave(),
   };
   window.__drift = api;
   window.__game = api;
