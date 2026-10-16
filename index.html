@@ -270,6 +270,25 @@
     #gPanel { width: 340px; } #gCarsWrap { width: 220px; }
     .set { padding: 6px 4px; }
   }
+  /* Узкое окно (вкладка Хаба, половина экрана): 16.10 гараж уходил за правый край уже ниже ~840 px, подсказка клавиш
+     залезала под спидометр, подсказка «E» - под спидометр и схему повреждений, кнопка паузы - на панель мира. */
+  #hKeys { max-width: calc(100% - 380px); white-space: normal; }       /* левее схемы повреждений и нитро (right 290 + 58 + 16) */
+  @media (max-width: 860px) {
+    #gStage { display: none; }
+    #gCarsWrap { width: 200px; }
+    #gPanel { width: auto; flex: 1 1 0; min-width: 0; }
+  }
+  @media (max-width: 520px) {
+    #scrGarage .cols { flex-direction: column; }
+    #gCarsWrap { width: auto; flex: 0 0 32%; }
+    #gPanel { flex: 1 1 0; min-height: 0; }
+  }
+  @media (max-width: 1180px) { #wPrompt { bottom: 262px; max-width: calc(100% - 32px); } }           /* над спидометром */
+  @media (max-width: 1180px) and (max-height: 760px) { #wPrompt { bottom: 226px; } }
+  @media (max-width: 640px) {
+    #hKeys { display: none; }                                         /* места нет: клавиши - в «Помощи» и «Настройках» */
+    #hPauseBtn { left: auto; right: 16px; transform: none; top: 216px; }        /* под картой, не на панели мира */
+  }
 </style>
 </head>
 <body>

@@ -323,6 +323,9 @@
     if (code.startsWith('Numpad')) return 'Num ' + code.slice(6);
     return code;
   };
+  const bindName = (a) => keyName(G.settings.bindings[a][0] || G.settings.bindings[a][1]);
+  // клавиши свободной езды, которые не переназначаются: действие на них в мире не сработало бы (карта и фото раньше)
+  const WORLD_KEYS = { KeyM: 'большая карта в свободной езде', KeyF: 'фото-режим в свободной езде' };
   function buildSettings() {
     const s = G.settings, body = $('sBody'), kb = (a) => keyName(s.bindings[a][0] || s.bindings[a][1]);
     document.querySelectorAll('#sTabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === G.sTab));
@@ -376,6 +379,7 @@
   function finishRebind(code) {
     const rb = G.rebinding; G.rebinding = null;
     if (code === null) { buildSettings(); return; }
+    if (WORLD_KEYS[code]) { buildSettings(); toast(`Клавиша ${keyName(code)} занята: ${WORLD_KEYS[code]}`); return; }
     const r = C.rebind(G.settings.bindings, rb.action, rb.slot, code);
     G.settings.bindings = r.bindings; save(KEY.settings, G.settings); applySettings();
     buildSettings();
@@ -408,7 +412,7 @@
       <h3>Управление</h3><ul>
       <li>${k('accel')} газ, ${k('brake')} тормоз и задний ход</li><li>${k('left')} ${k('right')} руль</li>
       <li>${k('handbrake')} ручник - сорвать заднюю ось в занос</li><li>${k('nitro')} нитро (копится в заносе)</li>
-      <li>${k('camera')} камера: сзади, дальняя, с капота</li><li>${k('reset')} вернуться на трассу</li>
+      <li>${k('camera')} камера: сзади, дальняя, с капота, из салона</li><li>${k('reset')} вернуться на трассу</li>
       <li>${k('pause')} или <kbd>Esc</kbd> пауза</li><li>${k('shiftUp')} ${k('shiftDown')} передачи (ручная коробка)</li><li>${k('repair')} ремонт в свободной езде</li></ul>
       <p>Клавиши меняются в «Настройках». Геймпад: стик - руль, курки - газ и тормоз.</p>
       <h3>Режимы</h3><ul><li><b>Гонка</b> - обгоните соперников, медаль за 1-3 место.</li><li><b>Дрифт</b> - очки за занос: шире угол и дольше серия - больше очков, множитель растёт до ×5. Удар о стену или машину срывает серию.</li>
@@ -461,10 +465,10 @@
   // ======================= заезд =======================
   const TIPS = ['Голубая арка показывает следующий чекпоинт.', 'Ручник срывает заднюю ось - так начинается занос.', 'Нитро копится, пока вы в заносе.',
     'На снегу тормозите раньше: сцепления почти вдвое меньше.', 'Удар о стену срывает серию дрифта - очки серии пропадают.', 'В паузе можно сменить камеру и управление в «Настройках».',
-    'Клавиша R вернёт машину на трассу, если вы застряли.', 'Соперники тоже ошибаются - особенно на лёгкой сложности.'];
+    'Клавиша {reset} вернёт машину на трассу, если вы застряли.', 'Соперники тоже ошибаются - особенно на лёгкой сложности.'];
   async function startRace(cfg, meta) {
     if (G.loading) return null;                 // второй щелчок «Заново» во время загрузки не строит второй заезд
-    G.loading = true;
+    G.loading = true; G.pauseAfterLoad = false;
     try { return await startRaceInner(cfg, meta); } finally { G.loading = false; }
   }
   async function startRaceInner(cfg, meta) {
@@ -474,7 +478,7 @@
     const td = trackDef(cfg.track);
     $('loadName').textContent = meta.title && meta.kind === 'career' ? meta.title : td.name;
     $('loadPlace').textContent = td.name + ' · ' + td.place + ' · ' + D.EVENT_TYPES[cfg.mode === 'free' ? 'race' : cfg.mode].name;
-    $('loadTip').textContent = TIPS[Math.floor(Math.random() * TIPS.length)];
+    $('loadTip').textContent = TIPS[Math.floor(Math.random() * TIPS.length)].replace('{reset}', bindName('reset'));          // клавиши - назначенные, а не по умолчанию
     drawMini($('loadMap'), cfg.track);
     $('loadBar').style.width = '0%';
     show('load');
@@ -496,6 +500,7 @@
     prepareHud();
     show('race');
     A.music('race');
+    pauseIfAsked();
     return race;
   }
   function stopRace() {
@@ -518,6 +523,10 @@
     if (p) setTimeout(() => $('pResume').focus(), 0);
   }
   G.setPaused = setPaused;
+  // Пауза, о которой попросили во время загрузки (оболочка, скрытая вкладка, потеря фокуса): экрана заезда ещё нет,
+  // поэтому она запоминается и включается, как только заезд или мир открылись. Новая загрузка начинает с чистого листа.
+  function pauseLater() { if (G.loading) G.pauseAfterLoad = true; }
+  function pauseIfAsked() { if (G.pauseAfterLoad) { G.pauseAfterLoad = false; setPaused(true); } }
   $('hPauseBtn').onclick = (e) => { e.currentTarget.blur(); setPaused(true); };
   $('pResume').onclick = () => setPaused(false);
   $('pSettings').onclick = () => { G.settingsFromPause = true; $('scrPause').classList.remove('show'); G.stack = []; G.screen = 'settings'; $('hud').classList.remove('show'); $('scrSettings').classList.add('show'); buildSettings(); };
@@ -803,7 +812,7 @@
     if (e.code === 'Escape' && !['main', 'boot', 'load'].includes(G.screen)) { if (G.screen === 'victory') show('main'); else back(); }
   });
   document.addEventListener('keyup', (e) => { G.keys.delete(e.code); });
-  window.addEventListener('blur', () => { G.keys.clear(); clearInput(); if (((G.race && G.screen === 'race' && !G.resultShown) || (G.world && G.screen === 'world')) && !G.paused && !G.manual) setPaused(true); });
+  window.addEventListener('blur', () => { G.keys.clear(); clearInput(); if (!G.manual) pauseLater(); if (((G.race && G.screen === 'race' && !G.resultShown) || (G.world && G.screen === 'world')) && !G.paused && !G.manual) setPaused(true); });
   document.addEventListener('pointerdown', () => A.init());
 
   let padPrev = [];
@@ -839,6 +848,7 @@
   // ======================= вкладка скрыта =======================
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
+      pauseLater();
       if (((G.race && G.screen === 'race' && !G.resultShown) || (G.world && G.screen === 'world')) && !G.paused) setPaused(true);
       if (G.world) saveWorld();
       A.suspend();
@@ -854,7 +864,7 @@
     if (e.source !== window.parent) return;            // команды принимаются только от окна-оболочки
     const d = e && e.data; if (!d || typeof d !== 'object') return;
     if (d.mix === 'pause') {
-      G.keys.clear(); clearInput();
+      G.keys.clear(); clearInput(); pauseLater();
       if (((G.race && G.screen === 'race' && !G.resultShown) || (G.world && G.screen === 'world')) && !G.paused) setPaused(true);
       if (G.world) saveWorld();
       A.suspend();
@@ -1017,13 +1027,13 @@
 
   async function startWorld(mapId, carId, fromFest) {
     if (G.loading) return null;
-    G.loading = true;
+    G.loading = true; G.pauseAfterLoad = false;
     try {
       A.init(); stopRace();
       const def = WD.MAPS.find((m) => m.id === mapId) || WD.MAPS[0];
       carId = G.career.owns(carId) ? carId : G.career.d.current;
       $('loadName').textContent = def.name; $('loadPlace').textContent = 'Свободная езда · ' + C.carDef(carId).name;
-      $('loadTip').textContent = 'M - большая карта с быстрым перемещением, E - события и дуэли, F - фото-режим, R - вернуться на дорогу.';
+      $('loadTip').textContent = `M - большая карта с быстрым перемещением, E - события и дуэли, F - фото-режим, ${bindName('reset')} - вернуться на дорогу.`;
       const lm = $('loadMap'), lg = lm.getContext('2d'); lg.clearRect(0, 0, lm.width, lm.height); lg.drawImage(mapImage(def.id).canvas, (lm.width - lm.height) / 2, 0, lm.height, lm.height);
       $('loadBar').style.width = '30%'; show('load');
       await new Promise((r) => setTimeout(r, 0));
@@ -1036,6 +1046,7 @@
       WR.init(G.world, G.settings);
       $('loadBar').style.width = '100%';
       enterWorldScreen();
+      pauseIfAsked();
       saveWorld();
       return G.world;
     } finally { G.loading = false; }

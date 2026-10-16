@@ -239,7 +239,7 @@
   const DIFFICULTY = { easy: { name: 'Легко', pace: -0.07, mistakes: 0.05 }, normal: { name: 'Нормально', pace: 0, mistakes: 0.025 },
     hard: { name: 'Сложно', pace: 0.05, mistakes: 0.008 } };
 
-  const VERSION = '1.1.0';        // версия игры (README, CHANGELOG, «Помощь» → «Об игре»)
+  const VERSION = '1.1.1';        // версия игры (README, CHANGELOG, «Помощь» → «Об игре»)
 
   return { VERSION, CARS, BODY, UPGRADES, UPG_MAX, UPG_PRICE, TIER_MUL, SURF, TRACKS, THEMES, CUPS, EVENT_TYPES, BASE_REWARD, PLACE_SHARE,
     MEDAL_SHARE, DRIVERS, RIVALS, PAINTS, RIMS, RIM_COLORS, LIVERIES, ACTIONS, DEFAULT_BINDINGS, DEFAULT_SETTINGS, QUALITY,
