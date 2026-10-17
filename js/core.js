@@ -1112,6 +1112,8 @@
     drawDist: () => Object.keys(D.DRAW_DIST), particles: () => ['low', 'medium', 'high'], camera: () => ['chase', 'far', 'hood', 'cockpit'],
     damage: () => ['off', 'visual', 'full'], rivalAi: () => ['neural', 'bot'] };
   const CODE_RE = /^[A-Za-z0-9]{1,24}$/;
+  // запасные клавиши для нового действия, чья клавиша по умолчанию уже занята игроком (mergeSettings)
+  const SPARE_KEYS = ['KeyT', 'KeyY', 'KeyH', 'KeyU', 'KeyJ', 'KeyN', 'KeyK', 'KeyL', 'KeyI', 'KeyO', 'KeyZ', 'KeyX', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'];
   function mergeSettings(saved) {
     const s = JSON.parse(JSON.stringify(D.DEFAULT_SETTINGS));
     if (!saved || typeof saved !== 'object') return s;
@@ -1134,6 +1136,13 @@
       const used = new Set();
       for (const a in s.bindings) if (Array.isArray(saved.bindings[a])) s.bindings[a].forEach((k) => { if (k) used.add(k); });
       for (const a in s.bindings) if (!Array.isArray(saved.bindings[a])) s.bindings[a] = s.bindings[a].map((k) => (k && used.has(k) ? '' : k));
+      // ...но и без клавиши не остаётся: иначе действие не вызвать (фестиваль 1.2.0 у игрока, отдавшего T другому, - «—»)
+      for (const a in s.bindings) {
+        if (Array.isArray(saved.bindings[a]) || s.bindings[a].some(Boolean)) continue;
+        for (const k in s.bindings) s.bindings[k].forEach((x) => { if (x) used.add(x); });
+        const free = SPARE_KEYS.find((k) => !used.has(k) && !D.RESERVED_KEYS[k]);
+        if (free) { s.bindings[a] = [free, '']; used.add(free); }
+      }
     }
     return s;
   }

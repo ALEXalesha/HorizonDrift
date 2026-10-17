@@ -313,6 +313,13 @@
     if (G.screen === 'gen') buildGen();
     return g.result;
   }
+  // Заезд или свободная езда прерывают стройку: шаг проверки (до ~0,1 с) иначе отнимал бы кадры у гонки.
+  // Текущий шаг доходит до конца, и genMake выходит на следующей передышке (run уже другой).
+  function genAbort() {
+    const g = G.gen; if (!g.busy) return;
+    g.run++;
+    $('genStatus').textContent = 'Создание трассы прервано: вы поехали. Нажмите «Создать трассу» ещё раз.';
+  }
   function genSave() {
     const r = G.gen.result; if (!r) return false;
     const i = G.genSaved.findIndex((s) => s.code === r.code);
@@ -626,6 +633,7 @@
   }
   async function startRaceInner(cfg, meta) {
     A.init();
+    genAbort();
     stopRace();
     G.cfg = cfg; G.meta = meta; G.paused = false; G.doneT = -1; G.resultShown = false; G.camMode = G.settings.camera;
     const td = trackDef(cfg.track);
@@ -1211,7 +1219,7 @@
     if (G.loading) return null;
     G.loading = true; G.pauseAfterLoad = false;
     try {
-      A.init(); stopRace();
+      A.init(); genAbort(); stopRace();
       const def = WD.MAPS.find((m) => m.id === mapId) || WD.MAPS[0];
       carId = G.career.owns(carId) ? carId : G.career.d.current;
       $('loadName').textContent = def.name; $('loadPlace').textContent = 'Свободная езда · ' + C.carDef(carId).name;
